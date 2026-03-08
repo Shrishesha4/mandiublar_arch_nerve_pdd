@@ -16,6 +16,7 @@ import numpy as np
 import pydicom
 import SimpleITK as sitk
 from scipy import ndimage
+from scipy import signal
 from skimage.morphology import skeletonize
 from PIL import Image
 
@@ -434,6 +435,40 @@ def _profile_points(x: np.ndarray, y: np.ndarray, step_target: int = 120) -> lis
     ]
 
 
+def _smooth_profile(x: np.ndarray, y: np.ndarray, window_length: int = 11, polyorder: int = 3) -> tuple[np.ndarray, np.ndarray]:
+    """
+    Smooth a profile using Savitzky-Golay filter for normalized, clean geometry.
+    
+    Parameters
+    ----------
+    x : np.ndarray
+        X-coordinates of the profile
+    y : np.ndarray
+        Y-coordinates of the profile
+    window_length : int
+        Window size for Savitzky-Golay filter (must be odd and >= polyorder + 2)
+    polyorder : int
+        Polynomial order for the filter
+    
+    Returns
+    -------
+    x_smooth, y_smooth : tuple[np.ndarray, np.ndarray]
+        Smoothed x and y coordinates
+    """
+    if len(x) < window_length:
+        return x, y
+    
+    # Ensure window_length is odd and reasonable
+    window_length = max(5, window_length if window_length % 2 == 1 else window_length - 1)
+    window_length = min(window_length, len(x))
+    polyorder = min(polyorder, window_length - 2)
+    
+    # Apply Savitzky-Golay filter to y-coordinates
+    y_smooth = signal.savgol_filter(y, window_length=window_length, polyorder=polyorder)
+    
+    return x, y_smooth
+
+
 def _crest_preview_profile(top: np.ndarray, bottom: np.ndarray, inset_ratio: float = 0.14) -> np.ndarray:
     """
     Return a display crest that sits slightly inside the superior cortical edge.
@@ -636,6 +671,10 @@ def build_planning_overlay(
         image_height=axial_bone.shape[0],
     )
 
+    # Smooth the outer contour profiles for normalized, clean geometry
+    _, preview_top = _smooth_profile(x, preview_top, window_length=11, polyorder=3)
+    _, preview_bottom = _smooth_profile(x, preview_bottom, window_length=11, polyorder=3)
+    
     # Outer contour = left lower side -> superior contour -> right lower side.
     outer_x = np.concatenate(([x[0]], x, [x[-1]]))
     outer_y = np.concatenate(([preview_bottom[0]], preview_top, [preview_bottom[-1]]))
@@ -643,7 +682,7 @@ def build_planning_overlay(
     inner_points = _profile_points(x, preview_bottom, step_target=120)
     outer_points = _profile_points(outer_x, outer_y, step_target=140)
 
-    # Central guide through the arch middle section.
+    # Central guide through the arch middle section with enhanced smoothing
     guide_trim = max(2, int(len(x) * 0.08))
     if len(x) > guide_trim * 2 + 2:
         guide_x = x[guide_trim:-guide_trim]
@@ -651,7 +690,13 @@ def build_planning_overlay(
     else:
         guide_x = x
         guide_y = preview_mid
-    base_guide = _profile_points(guide_x, guide_y, step_target=110)
+    
+    # Apply stronger smoothing to the middle line for smoother appearance
+    guide_window = min(15, max(7, len(guide_x) // 8))
+    if guide_window % 2 == 0:
+        guide_window -= 1
+    _, guide_y_smooth = _smooth_profile(guide_x, guide_y, window_length=guide_window, polyorder=3)
+    base_guide = _profile_points(guide_x, guide_y_smooth, step_target=110)
 
     measure_x = int(bone_metrics.get("measurement_location", {}).get("x", int((x[0] + x[-1]) / 2)))
     width_indicator = _make_width_indicator(x, preview_top, preview_bottom, measure_x)
