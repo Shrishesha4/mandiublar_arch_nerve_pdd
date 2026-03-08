@@ -228,7 +228,7 @@ private fun DrawScope.drawNerveMarkers(
 
     nervePath.forEach { pt ->
         val c = toCanvas(pt)
-        drawCircle(color = color.copy(alpha = 0.28f), radius = 6f, center = c)
-        drawCircle(color = color, radius = 3f, center = c)
+        drawCircle(color = color.copy(alpha = 0.20f), radius = 4f, center = c)
+        drawCircle(color = color, radius = 2f, center = c)
     }
 }

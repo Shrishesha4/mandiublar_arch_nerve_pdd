@@ -434,11 +434,23 @@ def _profile_points(x: np.ndarray, y: np.ndarray, step_target: int = 120) -> lis
     ]
 
 
+def _crest_preview_profile(top: np.ndarray, bottom: np.ndarray, inset_ratio: float = 0.14) -> np.ndarray:
+    """
+    Return a display crest that sits slightly inside the superior cortical edge.
+
+    Using the raw top edge makes the plotted arch ride on the outer silhouette and
+    looks unstable near the mandibular corners. A small inward inset tracks the
+    clinically relevant crest more closely in the preview.
+    """
+    thickness = np.maximum(1.0, bottom - top)
+    return top + thickness * inset_ratio
+
+
 def _expand_preview_profiles(
     top: np.ndarray,
     bottom: np.ndarray,
     image_height: int,
-    spread_ratio: float = 0.68,
+    spread_ratio: float = 0.62,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """
     Build aesthetically wider preview contours around the true mandibular midline.
@@ -449,10 +461,10 @@ def _expand_preview_profiles(
     """
     mid = (top + bottom) / 2.0
     thickness = np.maximum(1.0, bottom - top)
-    half_span = np.maximum(5.0, thickness * spread_ratio)
+    half_span = np.maximum(4.0, thickness * spread_ratio)
     preview_top = np.clip(mid - half_span, 0, image_height - 1)
     preview_bottom = np.clip(mid + half_span, 0, image_height - 1)
-    preview_mid = mid
+    preview_mid = (preview_top + preview_bottom) / 2.0
     return preview_top, preview_mid, preview_bottom
 
 
@@ -499,6 +511,7 @@ def _make_width_indicator(
     y_inner = float(bottom[idx])
     thickness = max(1.0, y_inner - y_outer)
 
+    # Tangent from the local midline profile, then rotate to a normal.
     mid_prev = (top[idx - 1] + bottom[idx - 1]) / 2.0
     mid_next = (top[idx + 1] + bottom[idx + 1]) / 2.0
     dx = float(x[idx + 1] - x[idx - 1])
@@ -509,14 +522,77 @@ def _make_width_indicator(
     tangent = tangent / np.linalg.norm(tangent)
     normal = np.array([-tangent[1], tangent[0]], dtype=np.float64)
 
-    mid_pt = np.array([x0, (y_outer + y_inner) / 2.0], dtype=np.float64)
-    p1 = mid_pt - normal * (thickness / 2.0)
-    p2 = mid_pt + normal * (thickness / 2.0)
+    mid = np.array([x0, (y_outer + y_inner) / 2.0], dtype=np.float64)
+    p1 = mid - normal * (thickness / 2.0)
+    p2 = mid + normal * (thickness / 2.0)
 
     return {
         "start": {"x": int(round(p1[0])), "y": int(round(p1[1]))},
         "end": {"x": int(round(p2[0])), "y": int(round(p2[1]))},
     }
+
+
+def _compute_planning_sector_lines(
+    x: np.ndarray,
+    top: np.ndarray,
+    bottom: np.ndarray,
+    image_height: int,
+) -> list[dict]:
+    """
+    Compute planning sector lines to match the viewer layout:
+      - left outer wall
+      - left arm of central inverted-V
+      - right arm of central inverted-V
+      - right outer wall
+
+    This intentionally avoids the trapezoid/bottom-connector look.
+    """
+    if len(x) < 12:
+        return []
+
+    lines: list[dict] = []
+    H = image_height
+    arch_w = float(x[-1] - x[0])
+
+    # Anchor along the superior arch, avoiding noisy extremes.
+    i_left_outer = max(0, int(len(x) * 0.04))
+    i_left_inner = max(i_left_outer + 1, int(len(x) * 0.22))
+    i_right_inner = min(len(x) - 2, int(len(x) * 0.78))
+    i_right_outer = min(len(x) - 1, int(len(x) * 0.96))
+    i_mid = len(x) // 2
+
+    left_outer = (int(x[i_left_outer]), int(top[i_left_outer]))
+    left_inner = (int(x[i_left_inner]), int(top[i_left_inner]))
+    right_inner = (int(x[i_right_inner]), int(top[i_right_inner]))
+    right_outer = (int(x[i_right_outer]), int(top[i_right_outer]))
+
+    # Lower support points near the mandibular base, left and right.
+    left_base_y = float(bottom[i_left_inner]) + max(10.0, (bottom[i_left_inner] - top[i_left_inner]) * 0.18)
+    right_base_y = float(bottom[i_right_inner]) + max(10.0, (bottom[i_right_inner] - top[i_right_inner]) * 0.18)
+    left_base = (
+        int(x[i_left_inner] - arch_w * 0.06),
+        int(np.clip(left_base_y, 0, H - 1)),
+    )
+    right_base = (
+        int(x[i_right_inner] + arch_w * 0.06),
+        int(np.clip(right_base_y, 0, H - 1)),
+    )
+
+    # Central apex of the inverted V, below the crest but above the lower image edge.
+    support_y = min(left_base[1], right_base[1])
+    mid_top = float(top[i_mid])
+    apex_y = mid_top + (support_y - mid_top) * 0.42
+    apex = (
+        int(x[i_mid]),
+        int(np.clip(apex_y, 0, H - 1)),
+    )
+
+    lines.append({"start": {"x": left_outer[0], "y": left_outer[1]}, "end": {"x": left_base[0], "y": left_base[1]}})
+    lines.append({"start": {"x": left_base[0], "y": left_base[1]}, "end": {"x": apex[0], "y": apex[1]}})
+    lines.append({"start": {"x": apex[0], "y": apex[1]}, "end": {"x": right_base[0], "y": right_base[1]}})
+    lines.append({"start": {"x": right_base[0], "y": right_base[1]}, "end": {"x": right_outer[0], "y": right_outer[1]}})
+
+    return lines
 
 
 def build_planning_overlay(
@@ -529,31 +605,29 @@ def build_planning_overlay(
 
     Returns:
       {
-        outer_contour: [...],
-        inner_contour: [...],
-        base_guide: [...],
-        width_indicator: {start,end} | None
+                outer_contour: [...],
+                inner_contour: [...],
+                base_guide: [...],
+                width_indicator: {start,end} | None,
+                sector_lines: [],
       }
     """
     n_slices = volume.shape[0]
+    _empty = {
+        "outer_contour": [],
+        "inner_contour": [],
+        "base_guide": [],
+        "width_indicator": None,
+        "sector_lines": [],
+    }
     if n_slices > 3:
-        return {
-            "outer_contour": [],
-            "inner_contour": [],
-            "base_guide": [],
-            "width_indicator": None,
-        }
+        return _empty
 
     mid_slice = n_slices // 2
     axial_bone = bone_mask[mid_slice]
     profiles = _extract_2d_mandible_profiles(axial_bone)
     if profiles is None:
-        return {
-            "outer_contour": [],
-            "inner_contour": [],
-            "base_guide": [],
-            "width_indicator": None,
-        }
+        return _empty
 
     x, top, bottom = profiles
     preview_top, preview_mid, preview_bottom = _expand_preview_profiles(
@@ -561,26 +635,33 @@ def build_planning_overlay(
         bottom,
         image_height=axial_bone.shape[0],
     )
-    overlay_x, overlay_top, overlay_mid, overlay_bottom = _trim_overlay_profiles(
-        x,
-        preview_top,
-        preview_mid,
-        preview_bottom,
-    )
 
-    # Emit three separate left→right arch curves.
-    outer_points = _profile_points(overlay_x, overlay_top, step_target=120)
-    inner_points = _profile_points(overlay_x, overlay_bottom, step_target=120)
-    base_guide = _profile_points(overlay_x, overlay_mid, step_target=120)
+    # Outer contour = left lower side -> superior contour -> right lower side.
+    outer_x = np.concatenate(([x[0]], x, [x[-1]]))
+    outer_y = np.concatenate(([preview_bottom[0]], preview_top, [preview_bottom[-1]]))
+
+    inner_points = _profile_points(x, preview_bottom, step_target=120)
+    outer_points = _profile_points(outer_x, outer_y, step_target=140)
+
+    # Central guide through the arch middle section.
+    guide_trim = max(2, int(len(x) * 0.08))
+    if len(x) > guide_trim * 2 + 2:
+        guide_x = x[guide_trim:-guide_trim]
+        guide_y = preview_mid[guide_trim:-guide_trim]
+    else:
+        guide_x = x
+        guide_y = preview_mid
+    base_guide = _profile_points(guide_x, guide_y, step_target=110)
 
     measure_x = int(bone_metrics.get("measurement_location", {}).get("x", int((x[0] + x[-1]) / 2)))
-    width_indicator = _make_width_indicator(overlay_x, overlay_top, overlay_bottom, measure_x)
+    width_indicator = _make_width_indicator(x, preview_top, preview_bottom, measure_x)
 
     return {
         "outer_contour": outer_points,
         "inner_contour": inner_points,
         "base_guide": base_guide,
         "width_indicator": width_indicator,
+        "sector_lines": [],
     }
 
 

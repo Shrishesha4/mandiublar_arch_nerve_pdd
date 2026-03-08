@@ -36,6 +36,7 @@ data class PlanningOverlay(
     @SerialName("inner_contour") val innerContour: List<NervePathPoint> = emptyList(),
     @SerialName("base_guide") val baseGuide: List<NervePathPoint> = emptyList(),
     @SerialName("width_indicator") val widthIndicator: OverlayLine? = null,
+    @SerialName("sector_lines") val sectorLines: List<OverlayLine> = emptyList(),
 )
 
 @Serializable

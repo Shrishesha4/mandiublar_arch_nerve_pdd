@@ -69,6 +69,7 @@ class PlanningOverlay(BaseModel):
     inner_contour: list[NervePoint]
     base_guide: list[NervePoint]
     width_indicator: OverlayLine | None = None
+    sector_lines: list[OverlayLine] = []
 
 
 class BoneMetrics(BaseModel):
@@ -182,8 +183,6 @@ async def analyze_jaw(
     nerve_mask = seg_result["nerve_mask"]
     mandible_center = seg_result.get("mandible_center", None)
 
-    nerve_path = extract_nerve_path_2d(nerve_mask)
-
     tooth_coords = None
     if tooth_x is not None and tooth_y is not None:
         tooth_coords = {"x": tooth_x, "y": tooth_y}
@@ -196,6 +195,11 @@ async def analyze_jaw(
 
     bone_metrics = calculate_bone_metrics(
         volume, bone_mask, nerve_mask, metadata, tooth_coords
+    )
+    nerve_path = extract_nerve_path_2d(
+        nerve_mask,
+        bone_mask=bone_mask,
+        preferred_x=bone_metrics["measurement_location"]["x"],
     )
     planning_overlay = build_planning_overlay(volume, bone_mask, bone_metrics)
     arch_pts = planning_overlay["outer_contour"]
@@ -227,6 +231,13 @@ async def analyze_jaw(
                     end=NervePoint(**planning_overlay["width_indicator"]["end"]),
                 ) if planning_overlay.get("width_indicator") else None
             ),
+            sector_lines=[
+                OverlayLine(
+                    start=NervePoint(**sl["start"]),
+                    end=NervePoint(**sl["end"]),
+                )
+                for sl in planning_overlay.get("sector_lines", [])
+            ],
         ),
         bone_metrics=BoneMetrics(**bone_metrics),
         metadata={
@@ -271,6 +282,13 @@ async def measure(req: MeasureRequest):
                     end=NervePoint(**planning_overlay["width_indicator"]["end"]),
                 ) if planning_overlay.get("width_indicator") else None
             ),
+            sector_lines=[
+                OverlayLine(
+                    start=NervePoint(**sl["start"]),
+                    end=NervePoint(**sl["end"]),
+                )
+                for sl in planning_overlay.get("sector_lines", [])
+            ],
         ),
     )
 

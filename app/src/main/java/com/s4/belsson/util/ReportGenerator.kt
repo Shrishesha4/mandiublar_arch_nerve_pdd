@@ -12,7 +12,6 @@ import java.util.*
  * Generates a PDF report summarising dental implant planning results.
  */
 class ReportGenerator(private val context: Context) {
-
     companion object {
         private const val PAGE_WIDTH = 595   // A4 in points
         private const val PAGE_HEIGHT = 842
@@ -252,9 +251,10 @@ class ReportGenerator(private val context: Context) {
 
     /**
      * Returns a new ARGB_8888 bitmap with overlays drawn to exactly match JawCanvasView:
-     *  - Outer / inner / base contours  → red smooth polylines
-     *  - Width indicator                → blue double-line with arrowheads
-     *  - Nerve markers (fallback only)  → orange dots
+     *  - Sector lines (red angular V-shapes)
+     *  - Outer arch crest  → white smooth polyline
+     *  - Nerve markers     → orange dots (always shown with overlay)
+     *  - Width indicator   → triple blue lines (implant simulation)
      */
     private fun drawOverlaysOnBitmap(src: Bitmap, analysis: AnalysisResponse): Bitmap {
         val bmp = src.copy(Bitmap.Config.ARGB_8888, true)
@@ -380,6 +380,17 @@ class ReportGenerator(private val context: Context) {
         // Arrowheads at both ends
         drawArrowHead(c, PointF(ex, ey), PointF(sx, sy), paint, density)
         drawArrowHead(c, PointF(sx, sy), PointF(ex, ey), paint, density)
+    }
+
+    /**
+     * Kept for compatibility – delegates to drawWidthIndicator.
+     */
+    private fun drawImplantLines(
+        c: Canvas,
+        indicator: com.s4.belsson.data.model.OverlayLine,
+        density: Float,
+    ) {
+        drawWidthIndicator(c, indicator, density)
     }
 
     private fun drawArrowHead(c: Canvas, tip: PointF, from: PointF, paint: Paint, density: Float) {

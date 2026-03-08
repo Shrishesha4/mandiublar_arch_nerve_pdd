@@ -155,22 +155,100 @@ class UNetSegmentor:
         return nerve_mask
 
 
-def extract_nerve_path_2d(nerve_mask: np.ndarray) -> list[dict]:
+def extract_nerve_path_2d(
+    nerve_mask: np.ndarray,
+    bone_mask: np.ndarray | None = None,
+    preferred_x: int | None = None,
+) -> list[dict]:
     """
     Project nerve mask onto the image plane and return centreline points
     sorted left → right.
+
+    For the current placeholder detector we aggressively filter displayed paths to
+    avoid showing random dark trabecular spaces as nerve canal traces.
     """
     projection = nerve_mask.any(axis=0).astype(np.uint8)   # (H, W)
 
     if projection.sum() == 0:
         return []
 
+    struct2d = ndimage.generate_binary_structure(2, 1)
+    labelled, n_feat = ndimage.label(projection, structure=struct2d)
+    if n_feat == 0:
+        return []
+
+    bone_projection = bone_mask.any(axis=0).astype(bool) if bone_mask is not None else None
+    chosen_component = None
+    best_score = -1e9
+
+    for i in range(1, n_feat + 1):
+        comp = labelled == i
+        area = int(comp.sum())
+        if area < 3:
+            continue
+
+        rows, cols = np.where(comp)
+        if len(rows) == 0:
+            continue
+
+        cy = float(rows.mean())
+        cx = float(cols.mean())
+        score = float(area)
+
+        if bone_projection is not None:
+            overlap = comp & bone_projection
+            if not overlap.any():
+                continue
+
+            overlap_rows, overlap_cols = np.where(overlap)
+            valid_cols = np.unique(overlap_cols)
+            top_samples = []
+            bottom_samples = []
+            for col in valid_cols:
+                bone_rows = np.where(bone_projection[:, col])[0]
+                if len(bone_rows) < 4:
+                    continue
+                top_samples.append(float(bone_rows.min()))
+                bottom_samples.append(float(bone_rows.max()))
+
+            if not top_samples:
+                continue
+
+            top_mean = float(np.mean(top_samples))
+            bottom_mean = float(np.mean(bottom_samples))
+            thickness = max(1.0, bottom_mean - top_mean)
+
+            # A plausible canal should sit inside the lower half of the mandible,
+            # not on the superior crest and not too close to the inferior edge.
+            if cy < top_mean + 0.30 * thickness:
+                continue
+            if cy > top_mean + 0.88 * thickness:
+                continue
+
+            relative_depth = (cy - top_mean) / thickness
+            score += 40.0 * (1.0 - abs(relative_depth - 0.62))
+
+        if preferred_x is not None:
+            score -= abs(cx - preferred_x) * 0.9
+
+        if score > best_score:
+            best_score = score
+            chosen_component = comp
+
+    if chosen_component is None:
+        return []
+
     from skimage.morphology import skeletonize
-    skeleton = skeletonize(projection).astype(bool)
+    skeleton = skeletonize(chosen_component).astype(bool)
     coords = np.argwhere(skeleton)   # (N, 2): row, col
 
     if len(coords) == 0:
-        return []
+        rows, cols = np.where(chosen_component)
+        if len(rows) == 0:
+            return []
+        cy = int(round(rows.mean()))
+        xs = np.unique(cols)
+        return [{"x": int(x), "y": cy} for x in xs[::max(1, len(xs) // 12)]]
 
     coords = coords[coords[:, 1].argsort()]   # sort by column (left → right)
     step = max(1, len(coords) // 200)
