@@ -13,6 +13,7 @@ data class AnalysisResponse(
     @SerialName("opg_image_base64") val opgImageBase64: String,
     @SerialName("nerve_path") val nervePath: List<NervePathPoint>,
     @SerialName("arch_path") val archPath: List<NervePathPoint> = emptyList(),
+    @SerialName("planning_overlay") val planningOverlay: PlanningOverlay = PlanningOverlay(),
     @SerialName("bone_metrics") val boneMetrics: BoneMetrics,
     val metadata: DicomMetadata
 )
@@ -21,6 +22,20 @@ data class AnalysisResponse(
 data class NervePathPoint(
     val x: Int,
     val y: Int
+)
+
+@Serializable
+data class OverlayLine(
+    val start: NervePathPoint,
+    val end: NervePathPoint
+)
+
+@Serializable
+data class PlanningOverlay(
+    @SerialName("outer_contour") val outerContour: List<NervePathPoint> = emptyList(),
+    @SerialName("inner_contour") val innerContour: List<NervePathPoint> = emptyList(),
+    @SerialName("base_guide") val baseGuide: List<NervePathPoint> = emptyList(),
+    @SerialName("width_indicator") val widthIndicator: OverlayLine? = null,
 )
 
 @Serializable
@@ -53,7 +68,8 @@ data class DicomMetadata(
  */
 @Serializable
 data class MeasureResponse(
-    @SerialName("bone_metrics") val boneMetrics: BoneMetrics
+    @SerialName("bone_metrics") val boneMetrics: BoneMetrics,
+    @SerialName("planning_overlay") val planningOverlay: PlanningOverlay = PlanningOverlay()
 )
 
 /**
@@ -65,4 +81,3 @@ data class MeasureRequest(
     val x: Int,
     val y: Int
 )
-

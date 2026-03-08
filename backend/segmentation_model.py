@@ -180,117 +180,111 @@ def extract_nerve_path_2d(nerve_mask: np.ndarray) -> list[dict]:
 
 def detect_arch_from_2d_slice(volume: np.ndarray) -> list[dict] | None:
     """
-    For a 2-D axial CBCT slice, detect the **smooth outer contour** of
-    the mandibular bone arch and return it as an ordered list of
-    {"x", "y"} pixel coords.
+    Detect a smooth OPEN mandibular arch on a 2-D axial CBCT slice.
 
-    Strategy:
-      1. Threshold to find bright bone
-      2. Keep the largest connected component (mandible)
-      3. Fill holes, then dilate slightly so the contour sits just
-         outside the cortex
-      4. Extract the outer boundary pixels
-      5. Order them as a continuous contour (nearest-neighbour walk)
-      6. Smooth with a moving-average filter to eliminate jaggedness
-      7. Subsample to ~120 points
+    Contract:
+      - returns points ordered left → right
+      - represents the superior outer mandibular contour (not a closed ring)
+      - suitable for direct overlay as a red arch/path
     """
-    struct2d = ndimage.generate_binary_structure(2, 1)
     sl = volume[0].astype(np.float64)
     H, W = sl.shape
+    struct2d = ndimage.generate_binary_structure(2, 1)
 
-    # 1. Threshold
-    thresh = np.percentile(sl, 70)
+    # 1) Bone threshold with gentle cleanup
+    thresh = np.percentile(sl, 68)
     binary = sl > thresh
     binary = ndimage.binary_opening(binary, structure=struct2d, iterations=2)
+    binary = ndimage.binary_closing(binary, structure=struct2d, iterations=2)
     if not binary.any():
         return None
 
-    # 2. Largest connected component
+    # 2) Keep the best mandibular component.
+    # Score favors large area and lower-half presence, which matches axial mandible.
     labelled, n_feat = ndimage.label(binary, structure=struct2d)
     if n_feat == 0:
         return None
-    sizes = [(ndimage.sum(binary, labelled, i), i)
-             for i in range(1, n_feat + 1)]
-    sizes.sort(reverse=True)
-    mandible = (labelled == sizes[0][1]).astype(bool)
-    mandible = ndimage.binary_fill_holes(mandible)
 
-    # 3. Slight dilation so the outline sits just outside the bone
-    dilated = ndimage.binary_dilation(mandible, structure=struct2d, iterations=2)
+    best_label = None
+    best_score = -1.0
+    for i in range(1, n_feat + 1):
+        comp = labelled == i
+        area = float(comp.sum())
+        if area < 200:
+            continue
+        rows, cols = np.where(comp)
+        if len(rows) == 0:
+            continue
+        cy = float(rows.mean())
+        lower_frac = float((rows > H * 0.30).mean())
+        width = float(cols.max() - cols.min() + 1)
+        score = area * (0.6 + lower_frac) + 0.05 * width + 0.02 * cy
+        if score > best_score:
+            best_score = score
+            best_label = i
 
-    # 4. Outer boundary = dilated − original
-    boundary = dilated & ~mandible
-
-    # 5. Order boundary pixels as a continuous contour via nearest-neighbour walk
-    coords = np.argwhere(boundary)          # (N, 2): row, col
-    if len(coords) < 20:
+    if best_label is None:
         return None
 
-    ordered = _order_contour(coords)
-    if ordered is None or len(ordered) < 20:
+    mandible = labelled == best_label
+
+    # 3) Column-wise superior contour.
+    # For each x, take the top-most bone pixel. This produces the open U-shaped arch.
+    cols = np.where(mandible.any(axis=0))[0]
+    if len(cols) < 20:
         return None
 
-    # 6. Smooth with a moving average (window ~3% of contour length)
-    window = max(5, len(ordered) // 30)
-    if window % 2 == 0:
-        window += 1
-    smoothed = _smooth_contour(ordered, window)
+    x_vals: list[int] = []
+    y_vals: list[float] = []
+    thickness_vals: list[int] = []
 
-    # 7. Subsample
-    step = max(1, len(smoothed) // 120)
-    sampled = smoothed[::step]
+    for x in cols:
+        rows = np.where(mandible[:, x])[0]
+        if len(rows) < 3:
+            continue
+        top = int(rows.min())
+        bottom = int(rows.max())
+        thickness = bottom - top + 1
+        # Ignore tiny vertical slivers/noise.
+        if thickness < 6:
+            continue
+        x_vals.append(int(x))
+        y_vals.append(float(top))
+        thickness_vals.append(int(thickness))
 
-    return [{"x": int(c[1]), "y": int(c[0])} for c in sampled]
-
-
-def _order_contour(coords: np.ndarray) -> np.ndarray | None:
-    """
-    Order a set of boundary pixels into a continuous contour by
-    greedy nearest-neighbour traversal.
-    """
-    from scipy.spatial import cKDTree
-
-    n = len(coords)
-    if n < 10:
+    if len(x_vals) < 20:
         return None
 
-    tree = cKDTree(coords)
-    visited = np.zeros(n, dtype=bool)
-    order = np.zeros(n, dtype=int)
+    x = np.asarray(x_vals, dtype=np.int32)
+    y = np.asarray(y_vals, dtype=np.float64)
+    t = np.asarray(thickness_vals, dtype=np.float64)
 
-    # Start from the top-most point (smallest row)
-    start = int(np.argmin(coords[:, 0]))
-    order[0] = start
-    visited[start] = True
+    # 4) Trim unstable edge columns where the component gets too thin.
+    # This removes the bad diagonal closure behavior seen in the screenshot.
+    thickness_cutoff = max(8.0, np.percentile(t, 15))
+    valid = t >= thickness_cutoff
+    if valid.sum() >= 20:
+        x = x[valid]
+        y = y[valid]
 
-    for i in range(1, n):
-        current = order[i - 1]
-        # Find nearest unvisited neighbour
-        dists, idxs = tree.query(coords[current], k=min(20, n))
-        found = False
-        for d, idx in zip(dists, idxs):
-            if not visited[idx]:
-                order[i] = idx
-                visited[idx] = True
-                found = True
-                break
-        if not found:
-            # All remaining visited; truncate
-            order = order[:i]
-            break
+    if len(x) < 20:
+        return None
 
-    return coords[order]
+    # 5) Smooth the superior contour.
+    # Median filter kills spikes, then Gaussian-like 1-D smoothing gives a clean arch.
+    y_med = ndimage.median_filter(y, size=9, mode="nearest")
+    y_smooth = ndimage.gaussian_filter1d(y_med, sigma=4, mode="nearest")
 
+    # 6) Enforce a single y per x and downsample to a manageable number of points.
+    # x is already increasing because cols came left→right.
+    step = max(1, len(x) // 120)
+    sampled_x = x[::step]
+    sampled_y = y_smooth[::step]
 
-def _smooth_contour(pts: np.ndarray, window: int) -> np.ndarray:
-    """Smooth a 2-D contour with a uniform moving-average filter."""
-    kernel = np.ones(window) / window
-    # Pad circularly for closed contour
-    pad = window // 2
-    rows = np.pad(pts[:, 0].astype(float), pad, mode='wrap')
-    cols = np.pad(pts[:, 1].astype(float), pad, mode='wrap')
-    rows_s = np.convolve(rows, kernel, mode='valid')
-    cols_s = np.convolve(cols, kernel, mode='valid')
-    return np.stack([rows_s, cols_s], axis=1).astype(int)
+    points = [
+        {"x": int(px), "y": int(py)}
+        for px, py in zip(sampled_x, sampled_y)
+    ]
 
+    return points if len(points) >= 8 else None
 

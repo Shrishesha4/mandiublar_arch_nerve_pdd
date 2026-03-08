@@ -17,6 +17,7 @@ fun PlanningDashboard(
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val tapMetrics by viewModel.tapMetrics.collectAsStateWithLifecycle()
+    val tapOverlay by viewModel.tapOverlay.collectAsStateWithLifecycle()
 
     when (val state = uiState) {
         is PlanningUiState.Idle,
@@ -35,6 +36,7 @@ fun PlanningDashboard(
                 opgBitmap = state.opgBitmap,
                 measurementManager = state.measurementManager,
                 tapMetrics = tapMetrics,
+                tapOverlay = tapOverlay,
                 onTapCoordinate = { x, y -> viewModel.measureAtCoordinate(x, y) },
                 onGenerateReport = { viewModel.generateReport() },
                 onReset = { viewModel.reset() },
@@ -43,4 +45,3 @@ fun PlanningDashboard(
         }
     }
 }
-

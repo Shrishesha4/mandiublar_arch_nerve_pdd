@@ -5,7 +5,7 @@ import android.net.Uri
 import android.provider.OpenableColumns
 import com.s4.belsson.data.api.ImplantApiService
 import com.s4.belsson.data.model.AnalysisResponse
-import com.s4.belsson.data.model.BoneMetrics
+import com.s4.belsson.data.model.MeasureResponse
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
@@ -45,10 +45,10 @@ class ImplantRepository(private val context: Context) {
     /**
      * Measure bone at a specific (x, y) for a previously uploaded session.
      */
-    fun measureAt(sessionId: String, x: Int, y: Int): Flow<Result<BoneMetrics>> = flow {
+    fun measureAt(sessionId: String, x: Int, y: Int): Flow<Result<MeasureResponse>> = flow {
         try {
             val response = ImplantApiService.measure(sessionId, x, y)
-            emit(Result.success(response.boneMetrics))
+            emit(Result.success(response))
         } catch (e: Exception) {
             emit(Result.failure(e))
         }
@@ -90,4 +90,3 @@ class ImplantRepository(private val context: Context) {
         return if (name.lowercase().endsWith(".dcm")) name else "$name.dcm"
     }
 }
-

@@ -9,27 +9,33 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.graphics.*
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.StrokeJoin
+import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
 import androidx.compose.ui.input.pointer.pointerInput
 import com.s4.belsson.data.model.NervePathPoint
+import com.s4.belsson.data.model.OverlayLine
+import com.s4.belsson.data.model.PlanningOverlay
+import kotlin.math.atan2
+import kotlin.math.cos
+import kotlin.math.sin
+import kotlin.math.sqrt
 
 /**
- * Custom Compose Canvas that renders:
- *  1. The DICOM axial slice at native contrast
- *  2. Mandible outer contour (red, matching clinical reference)
- *  3. IAN nerve canal markers (orange dots)
+ * Renders the DICOM slice, mandibular arch, and nerve markers.
  */
 @Composable
 fun JawCanvasView(
     opgBitmap: Bitmap?,
     nervePath: List<NervePathPoint>,
-    archPath: List<NervePathPoint> = emptyList(),
-    archControlPoints: List<Offset>? = null,
+    modifier: Modifier = Modifier,
+    planningOverlay: PlanningOverlay = PlanningOverlay(),
     onTap: ((x: Int, y: Int) -> Unit)? = null,
-    modifier: Modifier = Modifier
 ) {
     val displayBitmap = remember(opgBitmap) {
         opgBitmap?.copy(Bitmap.Config.ARGB_8888, false)
@@ -38,16 +44,25 @@ fun JawCanvasView(
     Canvas(
         modifier = modifier
             .fillMaxSize()
-            .pointerInput(Unit) {
+            .pointerInput(displayBitmap) {
                 detectTapGestures { offset ->
-                    onTap?.invoke(offset.x.toInt(), offset.y.toInt())
+                    val bmp = displayBitmap ?: return@detectTapGestures
+                    val scale = minOf(size.width / bmp.width, size.height / bmp.height)
+                    val left = (size.width - bmp.width * scale) / 2f
+                    val top = (size.height - bmp.height * scale) / 2f
+                    val right = left + bmp.width * scale
+                    val bottom = top + bmp.height * scale
+                    if (offset.x !in left..right || offset.y !in top..bottom) return@detectTapGestures
+
+                    val imageX = ((offset.x - left) / scale).toInt().coerceIn(0, bmp.width - 1)
+                    val imageY = ((offset.y - top) / scale).toInt().coerceIn(0, bmp.height - 1)
+                    onTap?.invoke(imageX, imageY)
                 }
             }
     ) {
         val canvasW = size.width
         val canvasH = size.height
 
-        // ── 1. Draw DICOM image ──────────────────────────────────────────
         var imgLeft = 0f
         var imgTop = 0f
         var imgScaleX = 1f
@@ -56,7 +71,6 @@ fun JawCanvasView(
         if (displayBitmap != null) {
             val bmpW = displayBitmap.width.toFloat()
             val bmpH = displayBitmap.height.toFloat()
-
             val scale = minOf(canvasW / bmpW, canvasH / bmpH)
             imgLeft = (canvasW - bmpW * scale) / 2f
             imgTop = (canvasH - bmpH * scale) / 2f
@@ -64,12 +78,10 @@ fun JawCanvasView(
             imgScaleY = scale
 
             drawIntoCanvas { canvas ->
-                val matrix = Matrix()
-                matrix.setScale(scale, scale)
-                matrix.postTranslate(imgLeft, imgTop)
-
-                // No brightness boost — the backend already normalises
-                // to full 0-255 range with percentile stretch
+                val matrix = Matrix().apply {
+                    setScale(scale, scale)
+                    postTranslate(imgLeft, imgTop)
+                }
                 val paint = android.graphics.Paint().apply {
                     isAntiAlias = true
                     isFilterBitmap = true
@@ -78,41 +90,47 @@ fun JawCanvasView(
             }
         }
 
-        // ── 2. Mandible contour (red outline) ────────────────────────────
-        if (archPath.size >= 4 && displayBitmap != null) {
-            drawContour(
-                points = archPath,
-                scaleX = imgScaleX,
-                scaleY = imgScaleY,
-                offsetX = imgLeft,
-                offsetY = imgTop,
-                color = Color.Red,
-                strokeWidth = 2.5f,
-                closed = true
-            )
-        }
-
-        // ── 3. Nerve canal markers (orange) ──────────────────────────────
-        if (nervePath.isNotEmpty() && displayBitmap != null) {
-            drawNerveMarkers(
+        if (displayBitmap != null) {
+            drawPlanningOverlay(
+                overlay = planningOverlay,
                 nervePath = nervePath,
                 scaleX = imgScaleX,
                 scaleY = imgScaleY,
                 offsetX = imgLeft,
                 offsetY = imgTop,
-                color = Color(0xFFFF9800)
             )
         }
     }
 }
 
-// ──────────────────────────────────────────────────────────────────────────────
+private fun DrawScope.drawPlanningOverlay(
+    overlay: PlanningOverlay,
+    nervePath: List<NervePathPoint>,
+    scaleX: Float,
+    scaleY: Float,
+    offsetX: Float,
+    offsetY: Float,
+) {
+    if (overlay.outerContour.isNotEmpty()) {
+        drawOpenPolyline(overlay.outerContour, scaleX, scaleY, offsetX, offsetY, Color.Red, 2.4f)
+    }
+    if (overlay.innerContour.isNotEmpty()) {
+        drawOpenPolyline(overlay.innerContour, scaleX, scaleY, offsetX, offsetY, Color.Red, 2.2f)
+    }
+    if (overlay.baseGuide.isNotEmpty()) {
+        drawOpenPolyline(overlay.baseGuide, scaleX, scaleY, offsetX, offsetY, Color.Red, 2.0f, smooth = false)
+    }
+    overlay.widthIndicator?.let {
+        drawWidthIndicator(it, scaleX, scaleY, offsetX, offsetY)
+    }
 
-/**
- * Draw a smooth closed or open contour from DICOM-pixel points,
- * mapped into canvas coordinates.
- */
-private fun DrawScope.drawContour(
+    // Keep subtle nerve markers only when no planning overlay is available.
+    if (overlay.outerContour.isEmpty() && nervePath.isNotEmpty()) {
+        drawNerveMarkers(nervePath, scaleX, scaleY, offsetX, offsetY, Color(0xFFFF9800))
+    }
+}
+
+private fun DrawScope.drawOpenPolyline(
     points: List<NervePathPoint>,
     scaleX: Float,
     scaleY: Float,
@@ -120,25 +138,27 @@ private fun DrawScope.drawContour(
     offsetY: Float,
     color: Color,
     strokeWidth: Float,
-    closed: Boolean
+    smooth: Boolean = true,
 ) {
     if (points.size < 2) return
-
-    fun toCanvas(p: NervePathPoint) = Offset(
-        p.x * scaleX + offsetX,
-        p.y * scaleY + offsetY
-    )
+    fun toCanvas(p: NervePathPoint) = Offset(p.x * scaleX + offsetX, p.y * scaleY + offsetY)
+    val mapped = points.map(::toCanvas)
 
     val path = Path()
-    val first = toCanvas(points[0])
-    path.moveTo(first.x, first.y)
-
-    for (i in 1 until points.size) {
-        val pt = toCanvas(points[i])
-        path.lineTo(pt.x, pt.y)
+    path.moveTo(mapped.first().x, mapped.first().y)
+    if (!smooth || mapped.size < 3) {
+        mapped.drop(1).forEach { path.lineTo(it.x, it.y) }
+    } else {
+        for (i in 1 until mapped.lastIndex) {
+            val current = mapped[i]
+            val next = mapped[i + 1]
+            val mid = Offset((current.x + next.x) / 2f, (current.y + next.y) / 2f)
+            path.quadraticTo(current.x, current.y, mid.x, mid.y)
+        }
+        val penultimate = mapped[mapped.lastIndex - 1]
+        val last = mapped.last()
+        path.quadraticTo(penultimate.x, penultimate.y, last.x, last.y)
     }
-
-    if (closed) path.close()
 
     drawPath(
         path = path,
@@ -147,9 +167,52 @@ private fun DrawScope.drawContour(
     )
 }
 
-/**
- * Draw nerve canal locations as small filled circles with a subtle halo.
- */
+private fun DrawScope.drawWidthIndicator(
+    indicator: OverlayLine,
+    scaleX: Float,
+    scaleY: Float,
+    offsetX: Float,
+    offsetY: Float,
+) {
+    fun toCanvas(p: NervePathPoint) = Offset(p.x * scaleX + offsetX, p.y * scaleY + offsetY)
+
+    val start = toCanvas(indicator.start)
+    val end = toCanvas(indicator.end)
+    val dx = end.x - start.x
+    val dy = end.y - start.y
+    val length = sqrt(dx * dx + dy * dy).coerceAtLeast(1f)
+    val nx = -dy / length
+    val ny = dx / length
+    val gap = 3f
+
+    val s1 = Offset(start.x + nx * gap, start.y + ny * gap)
+    val e1 = Offset(end.x + nx * gap, end.y + ny * gap)
+    val s2 = Offset(start.x - nx * gap, start.y - ny * gap)
+    val e2 = Offset(end.x - nx * gap, end.y - ny * gap)
+
+    val blue = Color(0xFF1E88E5)
+    drawLine(blue, s1, e1, strokeWidth = 2f, cap = StrokeCap.Round)
+    drawLine(blue, s2, e2, strokeWidth = 2f, cap = StrokeCap.Round)
+    drawArrowHead(end, start, blue)
+    drawArrowHead(start, end, blue)
+}
+
+private fun DrawScope.drawArrowHead(tip: Offset, from: Offset, color: Color) {
+    val angle = atan2(tip.y - from.y, tip.x - from.x)
+    val size = 10f
+    val wing = 0.45f
+    val p1 = Offset(
+        tip.x - size * cos(angle - wing),
+        tip.y - size * sin(angle - wing)
+    )
+    val p2 = Offset(
+        tip.x - size * cos(angle + wing),
+        tip.y - size * sin(angle + wing)
+    )
+    drawLine(color, tip, p1, strokeWidth = 2f, cap = StrokeCap.Round)
+    drawLine(color, tip, p2, strokeWidth = 2f, cap = StrokeCap.Round)
+}
+
 private fun DrawScope.drawNerveMarkers(
     nervePath: List<NervePathPoint>,
     scaleX: Float,
@@ -163,27 +226,9 @@ private fun DrawScope.drawNerveMarkers(
         p.y * scaleY + offsetY
     )
 
-    // Draw each nerve point as a small marker
     nervePath.forEach { pt ->
         val c = toCanvas(pt)
-        // Outer halo
-        drawCircle(color = color.copy(alpha = 0.3f), radius = 6f, center = c)
-        // Inner dot
+        drawCircle(color = color.copy(alpha = 0.28f), radius = 6f, center = c)
         drawCircle(color = color, radius = 3f, center = c)
-    }
-
-    // Connect nearby points with lines
-    if (nervePath.size >= 2) {
-        for (i in 0 until nervePath.size - 1) {
-            val a = toCanvas(nervePath[i])
-            val b = toCanvas(nervePath[i + 1])
-            // Only connect if they are reasonably close (same canal cluster)
-            val dist = kotlin.math.sqrt(
-                (a.x - b.x) * (a.x - b.x) + (a.y - b.y) * (a.y - b.y)
-            )
-            if (dist < 30f * scaleX) {
-                drawLine(color = color, start = a, end = b, strokeWidth = 2f, cap = StrokeCap.Round)
-            }
-        }
     }
 }

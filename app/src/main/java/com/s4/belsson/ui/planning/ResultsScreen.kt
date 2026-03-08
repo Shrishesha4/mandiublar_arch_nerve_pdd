@@ -1,6 +1,7 @@
  package com.s4.belsson.ui.planning
 
 import android.content.Intent
+import android.graphics.Bitmap
 import android.widget.Toast
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
@@ -8,7 +9,8 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
-import androidx.compose.runtime.*
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -19,8 +21,8 @@ import androidx.compose.ui.unit.dp
 import androidx.core.content.FileProvider
 import com.s4.belsson.data.model.AnalysisResponse
 import com.s4.belsson.data.model.BoneMetrics
+import com.s4.belsson.data.model.PlanningOverlay
 import com.s4.belsson.util.MeasurementManager
-import android.graphics.Bitmap
 
 /**
  * Results screen – displays analysis results with interactive jaw view.
@@ -31,6 +33,7 @@ fun ResultsScreen(
     opgBitmap: Bitmap?,
     measurementManager: MeasurementManager,
     tapMetrics: BoneMetrics?,
+    tapOverlay: PlanningOverlay?,
     onTapCoordinate: (x: Int, y: Int) -> Unit,
     onGenerateReport: () -> java.io.File?,
     onReset: () -> Unit,
@@ -38,6 +41,9 @@ fun ResultsScreen(
 ) {
     val context = LocalContext.current
     val scrollState = rememberScrollState()
+    val activeOverlay = remember(analysis.planningOverlay, tapOverlay) {
+        tapOverlay ?: analysis.planningOverlay
+    }
 
     Column(
         modifier = modifier
@@ -74,8 +80,8 @@ fun ResultsScreen(
                 JawCanvasView(
                     opgBitmap = opgBitmap,
                     nervePath = analysis.nervePath,
-                    archPath  = analysis.archPath,
-                    onTap     = onTapCoordinate
+                    planningOverlay = activeOverlay,
+                    onTap = onTapCoordinate
                 )
 
                 // Hint overlay
@@ -177,7 +183,7 @@ fun ResultsScreen(
                         }
                         try {
                             context.startActivity(intent)
-                        } catch (e: Exception) {
+                        } catch (_: Exception) {
                             Toast.makeText(context, "PDF saved: ${file.name}", Toast.LENGTH_LONG).show()
                         }
                     }
@@ -283,4 +289,3 @@ private fun MetricItem(label: String, value: String) {
         )
     }
 }
-

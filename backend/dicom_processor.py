@@ -239,61 +239,67 @@ def calculate_bone_metrics(
     axial_vol   = volume[mid_slice]      # (H, W)
 
     # ── Bone Width (buccolingual / labio-lingual) ────────────────────────
-    # Scan the horizontal row at cy for bone pixels
-    row_bone = axial_bone[cy, :]
-    bone_cols = np.where(row_bone)[0]
-
-    if len(bone_cols) < 2:
-        # Expand search: look within ±10 rows of cy
-        search_region = axial_bone[max(0, cy - 10): min(H, cy + 11), :]
-        row_sums = search_region.sum(axis=0)
-        bone_cols_broad = np.where(row_sums > 0)[0]
-        width_px = (bone_cols_broad[-1] - bone_cols_broad[0]) if len(bone_cols_broad) >= 2 else 0
+    if is_2d:
+        profiles = _extract_2d_mandible_profiles(axial_bone)
+        if profiles is not None:
+            prof_x, prof_top, prof_bottom = profiles
+            idx = int(np.argmin(np.abs(prof_x - cx)))
+            idx = int(np.clip(idx, 0, len(prof_x) - 1))
+            width_px = max(0.0, float(prof_bottom[idx] - prof_top[idx]))
+        else:
+            row_bone = axial_bone[cy, :]
+            bone_cols = np.where(row_bone)[0]
+            width_px = float(bone_cols[-1] - bone_cols[0]) if len(bone_cols) >= 2 else 0.0
+        width_mm = width_px * pixel_spacing[0]
     else:
-        width_px = bone_cols[-1] - bone_cols[0]
-
-    width_mm = width_px * pixel_spacing[1]
+        row_bone = axial_bone[cy, :]
+        bone_cols = np.where(row_bone)[0]
+        if len(bone_cols) < 2:
+            search_region = axial_bone[max(0, cy - 10): min(H, cy + 11), :]
+            row_sums = search_region.sum(axis=0)
+            bone_cols_broad = np.where(row_sums > 0)[0]
+            width_px = (bone_cols_broad[-1] - bone_cols_broad[0]) if len(bone_cols_broad) >= 2 else 0
+        else:
+            width_px = bone_cols[-1] - bone_cols[0]
+        width_mm = width_px * pixel_spacing[1]
 
     # ── Bone Height (crest → IAN nerve, or crest → base of bone) ─────────
     if is_2d:
-        # In a 2-D slice height is measured VERTICALLY (row axis = pixel_spacing[0])
-        # Look at the column at cx for bone rows
-        col_bone  = axial_bone[:, cx]
-        col_nerve = axial_nerve[:, cx]
-
-        bone_rows  = np.where(col_bone)[0]
-        nerve_rows = np.where(col_nerve)[0]
-
-        if len(bone_rows) < 2 and len(bone_rows) == 0:
-            # Widen search horizontally ±10 columns around cx
-            search_col = axial_bone[:, max(0, cx - 10): min(W, cx + 11)]
-            row_sums = search_col.sum(axis=1)
-            bone_rows = np.where(row_sums > 0)[0]
-
-        if len(bone_rows) >= 2:
-            crest_row = bone_rows.min()
+        profiles = _extract_2d_mandible_profiles(axial_bone)
+        if profiles is not None:
+            prof_x, prof_top, prof_bottom = profiles
+            idx = int(np.argmin(np.abs(prof_x - cx)))
+            idx = int(np.clip(idx, 0, len(prof_x) - 1))
+            crest_row = int(round(prof_top[idx]))
+            base_row = int(round(prof_bottom[idx]))
+            col_nerve = axial_nerve[:, int(prof_x[idx])]
+            nerve_rows = np.where(col_nerve)[0]
             if len(nerve_rows) >= 1:
-                # Nerve found: height from crest to top edge of nerve
-                nerve_top_row = nerve_rows.min()
+                nerve_top_row = int(nerve_rows.min())
                 height_px = max(0, nerve_top_row - crest_row)
             else:
-                # No nerve detected: full bone column height
-                height_px = bone_rows.max() - crest_row
-        elif len(bone_rows) == 1:
-            height_px = 1
+                height_px = max(0, base_row - crest_row)
         else:
-            height_px = 0
-
+            col_bone  = axial_bone[:, cx]
+            col_nerve = axial_nerve[:, cx]
+            bone_rows  = np.where(col_bone)[0]
+            nerve_rows = np.where(col_nerve)[0]
+            if len(bone_rows) >= 2:
+                crest_row = int(bone_rows.min())
+                if len(nerve_rows) >= 1:
+                    height_px = max(0, int(nerve_rows.min()) - crest_row)
+                else:
+                    height_px = int(bone_rows.max() - crest_row)
+            elif len(bone_rows) == 1:
+                height_px = 1
+            else:
+                height_px = 0
         height_mm = height_px * pixel_spacing[0]
-
     else:
-        # 3-D: height measured through slices (depth axis)
         coronal_bone  = bone_mask[:, cy, cx]
         coronal_nerve = nerve_mask[:, cy, cx]
-
         bone_slices  = np.where(coronal_bone)[0]
         nerve_slices = np.where(coronal_nerve)[0]
-
         if len(bone_slices) >= 1 and len(nerve_slices) >= 1:
             crest_slice = bone_slices[0]
             nerve_top   = nerve_slices[0]
@@ -302,7 +308,6 @@ def calculate_bone_metrics(
             height_px = bone_slices[-1] - bone_slices[0]
         else:
             height_px = 0
-
         height_mm = height_px * slice_thickness
 
     safe_height_mm = max(0.0, height_mm - SAFETY_MARGIN_MM)
@@ -327,3 +332,187 @@ def calculate_bone_metrics(
         "measurement_location": {"x": cx, "y": cy},
     }
 
+
+# ======================================================================
+# 2-D planning overlay helpers
+# ======================================================================
+
+def _extract_2d_mandible_profiles(axial_bone: np.ndarray):
+    """
+    Extract smooth superior/inferior mandibular profiles from a filled 2-D
+    mandible mask.
+
+    Returns (x, top_y, bottom_y) arrays ordered left→right, or None.
+    """
+    H, W = axial_bone.shape
+    cols = np.where(axial_bone.any(axis=0))[0]
+    if len(cols) < 20:
+        return None
+
+    x_vals: list[int] = []
+    top_vals: list[float] = []
+    bottom_vals: list[float] = []
+    thickness_vals: list[int] = []
+
+    for x in cols:
+        rows = np.where(axial_bone[:, x])[0]
+        if len(rows) < 3:
+            continue
+        top = int(rows.min())
+        bottom = int(rows.max())
+        thickness = bottom - top + 1
+        if thickness < 6:
+            continue
+        x_vals.append(int(x))
+        top_vals.append(float(top))
+        bottom_vals.append(float(bottom))
+        thickness_vals.append(int(thickness))
+
+    if len(x_vals) < 20:
+        return None
+
+    x = np.asarray(x_vals, dtype=np.int32)
+    top = np.asarray(top_vals, dtype=np.float64)
+    bottom = np.asarray(bottom_vals, dtype=np.float64)
+    thickness = np.asarray(thickness_vals, dtype=np.float64)
+
+    # Trim unstable edges where the mask gets too thin.
+    cutoff = max(8.0, np.percentile(thickness, 15))
+    valid = thickness >= cutoff
+    if valid.sum() >= 20:
+        x = x[valid]
+        top = top[valid]
+        bottom = bottom[valid]
+
+    if len(x) < 20:
+        return None
+
+    # Smooth profiles.
+    top = ndimage.gaussian_filter1d(
+        ndimage.median_filter(top, size=9, mode="nearest"),
+        sigma=4,
+        mode="nearest"
+    )
+    bottom = ndimage.gaussian_filter1d(
+        ndimage.median_filter(bottom, size=9, mode="nearest"),
+        sigma=4,
+        mode="nearest"
+    )
+
+    return x, top, bottom
+
+
+def _profile_points(x: np.ndarray, y: np.ndarray, step_target: int = 120) -> list[dict]:
+    step = max(1, len(x) // step_target)
+    return [
+        {"x": int(px), "y": int(py)}
+        for px, py in zip(x[::step], y[::step])
+    ]
+
+
+def _make_width_indicator(
+    x: np.ndarray,
+    top: np.ndarray,
+    bottom: np.ndarray,
+    measure_x: int,
+) -> dict | None:
+    """
+    Build a short normal-ish width indicator at the selected x-position.
+    Returns {start:{x,y}, end:{x,y}}.
+    """
+    if len(x) < 3:
+        return None
+
+    idx = int(np.argmin(np.abs(x - measure_x)))
+    idx = int(np.clip(idx, 1, len(x) - 2))
+
+    x0 = float(x[idx])
+    y_outer = float(top[idx])
+    y_inner = float(bottom[idx])
+    thickness = max(1.0, y_inner - y_outer)
+
+    # Tangent from the local midline profile, then rotate to a normal.
+    mid_prev = (top[idx - 1] + bottom[idx - 1]) / 2.0
+    mid_next = (top[idx + 1] + bottom[idx + 1]) / 2.0
+    dx = float(x[idx + 1] - x[idx - 1])
+    dy = float(mid_next - mid_prev)
+    tangent = np.array([dx, dy], dtype=np.float64)
+    if np.linalg.norm(tangent) < 1e-6:
+        tangent = np.array([1.0, 0.0])
+    tangent = tangent / np.linalg.norm(tangent)
+    normal = np.array([-tangent[1], tangent[0]], dtype=np.float64)
+
+    mid = np.array([x0, (y_outer + y_inner) / 2.0], dtype=np.float64)
+    p1 = mid - normal * (thickness / 2.0)
+    p2 = mid + normal * (thickness / 2.0)
+
+    return {
+        "start": {"x": int(round(p1[0])), "y": int(round(p1[1]))},
+        "end": {"x": int(round(p2[0])), "y": int(round(p2[1]))},
+    }
+
+
+def build_planning_overlay(
+    volume: np.ndarray,
+    bone_mask: np.ndarray,
+    bone_metrics: dict,
+) -> dict:
+    """
+    Build the planning-style overlay for a 2-D axial mandible slice.
+
+    Returns:
+      {
+        outer_contour: [...],
+        inner_contour: [...],
+        base_guide: [...],
+        width_indicator: {start,end} | None
+      }
+    """
+    n_slices = volume.shape[0]
+    if n_slices > 3:
+        return {
+            "outer_contour": [],
+            "inner_contour": [],
+            "base_guide": [],
+            "width_indicator": None,
+        }
+
+    mid_slice = n_slices // 2
+    axial_bone = bone_mask[mid_slice]
+    profiles = _extract_2d_mandible_profiles(axial_bone)
+    if profiles is None:
+        return {
+            "outer_contour": [],
+            "inner_contour": [],
+            "base_guide": [],
+            "width_indicator": None,
+        }
+
+    x, top, bottom = profiles
+    H, W = axial_bone.shape
+
+    # Outer contour = left lower side → superior contour → right lower side
+    outer_x = np.concatenate(([x[0]], x, [x[-1]]))
+    outer_y = np.concatenate(([bottom[0]], top, [bottom[-1]]))
+
+    inner_points = _profile_points(x, bottom, step_target=120)
+    outer_points = _profile_points(outer_x, outer_y, step_target=140)
+
+    # Stylized base guide (V-shape) like the clinical planning view.
+    apex_x = int((x[0] + x[-1]) / 2)
+    apex_y = int(min(H - 1, bottom.max() + max(18, 0.14 * H)))
+    base_guide = [
+        {"x": int(x[0]), "y": int(bottom[0])},
+        {"x": apex_x, "y": apex_y},
+        {"x": int(x[-1]), "y": int(bottom[-1])},
+    ]
+
+    measure_x = int(bone_metrics.get("measurement_location", {}).get("x", apex_x))
+    width_indicator = _make_width_indicator(x, top, bottom, measure_x)
+
+    return {
+        "outer_contour": outer_points,
+        "inner_contour": inner_points,
+        "base_guide": base_guide,
+        "width_indicator": width_indicator,
+    }

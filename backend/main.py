@@ -17,8 +17,13 @@ from fastapi import FastAPI, UploadFile, File, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
-from dicom_processor import load_dicom_volume, generate_opg, calculate_bone_metrics
-from segmentation_model import UNetSegmentor, extract_nerve_path_2d, detect_arch_from_2d_slice
+from dicom_processor import (
+    load_dicom_volume,
+    generate_opg,
+    calculate_bone_metrics,
+    build_planning_overlay,
+)
+from segmentation_model import UNetSegmentor, extract_nerve_path_2d
 
 # ---------- Logging ----------
 logging.basicConfig(level=logging.INFO)
@@ -53,6 +58,18 @@ class NervePoint(BaseModel):
     y: int
 
 
+class OverlayLine(BaseModel):
+    start: NervePoint
+    end: NervePoint
+
+
+class PlanningOverlay(BaseModel):
+    outer_contour: list[NervePoint]
+    inner_contour: list[NervePoint]
+    base_guide: list[NervePoint]
+    width_indicator: OverlayLine | None = None
+
+
 class BoneMetrics(BaseModel):
     width_mm: float
     height_mm: float
@@ -67,7 +84,8 @@ class AnalysisResponse(BaseModel):
     patient_name: str
     opg_image_base64: str
     nerve_path: list[NervePoint]
-    arch_path: list[NervePoint]          # NEW: detected jaw arch points
+    arch_path: list[NervePoint]
+    planning_overlay: PlanningOverlay
     bone_metrics: BoneMetrics
     metadata: dict
 
@@ -80,6 +98,7 @@ class MeasureRequest(BaseModel):
 
 class MeasureResponse(BaseModel):
     bone_metrics: BoneMetrics
+    planning_overlay: PlanningOverlay
 
 
 # ---------- Endpoints ----------
@@ -160,30 +179,20 @@ async def analyze_jaw(
     nerve_mask = seg_result["nerve_mask"]
     mandible_center = seg_result.get("mandible_center", None)
 
-    # 4. Extract nerve path (2D)
     nerve_path = extract_nerve_path_2d(nerve_mask)
 
-    # 5. Arch detection (2-D axial path or empty list for 3-D)
-    is_2d = volume.shape[0] <= 3
-    arch_pts: list[dict] = []
-    if is_2d:
-        detected = detect_arch_from_2d_slice(volume)
-        if detected:
-            arch_pts = detected
-
-    # 6. Bone metrics – use mandible centroid as default if no user coords given
     tooth_coords = None
     if tooth_x is not None and tooth_y is not None:
         tooth_coords = {"x": tooth_x, "y": tooth_y}
     elif mandible_center is not None:
-        # Use centroid so default measurement is always on real bone
         tooth_coords = {"x": mandible_center[1], "y": mandible_center[0]}
 
     bone_metrics = calculate_bone_metrics(
         volume, bone_mask, nerve_mask, metadata, tooth_coords
     )
+    planning_overlay = build_planning_overlay(volume, bone_mask, bone_metrics)
+    arch_pts = planning_overlay["outer_contour"]
 
-    # 7. Cache for subsequent /measure calls
     session_id = str(uuid.uuid4())
     _volume_cache[session_id] = {
         "volume": volume,
@@ -191,7 +200,6 @@ async def analyze_jaw(
         "nerve_mask": nerve_mask,
         "metadata": metadata,
     }
-    # Keep cache small (last 5 sessions)
     if len(_volume_cache) > 5:
         oldest = next(iter(_volume_cache))
         del _volume_cache[oldest]
@@ -202,6 +210,17 @@ async def analyze_jaw(
         opg_image_base64=opg_b64,
         nerve_path=[NervePoint(**p) for p in nerve_path],
         arch_path=[NervePoint(**p) for p in arch_pts],
+        planning_overlay=PlanningOverlay(
+            outer_contour=[NervePoint(**p) for p in planning_overlay["outer_contour"]],
+            inner_contour=[NervePoint(**p) for p in planning_overlay["inner_contour"]],
+            base_guide=[NervePoint(**p) for p in planning_overlay["base_guide"]],
+            width_indicator=(
+                OverlayLine(
+                    start=NervePoint(**planning_overlay["width_indicator"]["start"]),
+                    end=NervePoint(**planning_overlay["width_indicator"]["end"]),
+                ) if planning_overlay.get("width_indicator") else None
+            ),
+        ),
         bone_metrics=BoneMetrics(**bone_metrics),
         metadata={
             "pixel_spacing": metadata["pixel_spacing"],
@@ -230,7 +249,23 @@ async def measure(req: MeasureRequest):
         cached["metadata"],
         {"x": req.x, "y": req.y},
     )
-    return MeasureResponse(bone_metrics=BoneMetrics(**bone_metrics))
+    planning_overlay = build_planning_overlay(
+        cached["volume"], cached["bone_mask"], bone_metrics
+    )
+    return MeasureResponse(
+        bone_metrics=BoneMetrics(**bone_metrics),
+        planning_overlay=PlanningOverlay(
+            outer_contour=[NervePoint(**p) for p in planning_overlay["outer_contour"]],
+            inner_contour=[NervePoint(**p) for p in planning_overlay["inner_contour"]],
+            base_guide=[NervePoint(**p) for p in planning_overlay["base_guide"]],
+            width_indicator=(
+                OverlayLine(
+                    start=NervePoint(**planning_overlay["width_indicator"]["start"]),
+                    end=NervePoint(**planning_overlay["width_indicator"]["end"]),
+                ) if planning_overlay.get("width_indicator") else None
+            ),
+        ),
+    )
 
 
 # ---------- Run ----------

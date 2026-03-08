@@ -9,6 +9,7 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.s4.belsson.data.model.AnalysisResponse
 import com.s4.belsson.data.model.BoneMetrics
+import com.s4.belsson.data.model.PlanningOverlay
 import com.s4.belsson.data.repository.ImplantRepository
 import com.s4.belsson.util.MeasurementManager
 import com.s4.belsson.util.ReportGenerator
@@ -48,6 +49,9 @@ class PlanningViewModel(application: Application) : AndroidViewModel(application
     private val _tapMetrics = MutableStateFlow<BoneMetrics?>(null)
     val tapMetrics: StateFlow<BoneMetrics?> = _tapMetrics.asStateFlow()
 
+    private val _tapOverlay = MutableStateFlow<PlanningOverlay?>(null)
+    val tapOverlay: StateFlow<PlanningOverlay?> = _tapOverlay.asStateFlow()
+
     /** Session ID from the last successful analysis */
     private var currentSessionId: String? = null
 
@@ -61,6 +65,7 @@ class PlanningViewModel(application: Application) : AndroidViewModel(application
     fun uploadDicom(uri: Uri) {
         _uiState.value = PlanningUiState.Loading
         _tapMetrics.value = null
+        _tapOverlay.value = null
 
         viewModelScope.launch {
             repository.analyzeJaw(uri).collect { result ->
@@ -105,7 +110,10 @@ class PlanningViewModel(application: Application) : AndroidViewModel(application
         viewModelScope.launch {
             repository.measureAt(sessionId, x, y).collect { result ->
                 result.fold(
-                    onSuccess = { metrics -> _tapMetrics.value = metrics },
+                    onSuccess = { response ->
+                        _tapMetrics.value = response.boneMetrics
+                        _tapOverlay.value = response.planningOverlay
+                    },
                     onFailure = { /* silently ignore for now */ }
                 )
             }
@@ -137,6 +145,7 @@ class PlanningViewModel(application: Application) : AndroidViewModel(application
     fun reset() {
         _uiState.value = PlanningUiState.Idle
         _tapMetrics.value = null
+        _tapOverlay.value = null
         currentSessionId = null
     }
 
@@ -149,9 +158,8 @@ class PlanningViewModel(application: Application) : AndroidViewModel(application
             if (base64.isBlank()) return null
             val bytes = Base64.decode(base64, Base64.DEFAULT)
             BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
-        } catch (e: Exception) {
+        } catch (_: Exception) {
             null
         }
     }
 }
-
