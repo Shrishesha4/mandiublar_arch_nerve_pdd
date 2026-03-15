@@ -20,6 +20,7 @@ import pydicom
 import SimpleITK as sitk
 from scipy import ndimage
 from scipy import signal
+from scipy.interpolate import UnivariateSpline
 from skimage.feature import canny
 from skimage.filters import frangi
 from skimage.morphology import skeletonize, remove_small_objects
@@ -487,26 +488,23 @@ def generate_opg(volume: np.ndarray, metadata: dict) -> str:
             opg_norm = np.zeros((H, W), dtype=np.uint8)
 
     else:
-        # ── 3-D path: arch-unwrapped MIP ─────────────────────────────────
-        arch_points = detect_dental_arch(volume, metadata)
-        num_points  = len(arch_points)
-        opg = np.zeros((n_slices, num_points), dtype=np.float64)
+        # ── 3-D path: coronal MIP ────────────────────────────────────────
+        # Collapse the slice axis with a Maximum Intensity Projection.
+        # This produces a clean (H, W) anatomical preview from the
+        # (n_slices, H, W) CBCT volume, avoiding the vertical streak
+        # artifacts that the old arch-unwrapped approach produced.
+        preview = np.max(volume, axis=0).astype(np.float64)
 
-        for i, (r, c) in enumerate(arch_points):
-            r = int(np.clip(r, 0, H - 1))
-            c = int(np.clip(c, 0, W - 1))
-            r_lo, r_hi = max(0, r - 3), min(H, r + 4)
-            c_lo, c_hi = max(0, c - 3), min(W, c + 4)
-            patch = volume[:, r_lo:r_hi, c_lo:c_hi]
-            opg[:, i] = np.max(patch, axis=(1, 2))
+        p_low  = np.percentile(preview, 1)
+        p_high = np.percentile(preview, 99)
+        if p_high <= p_low:
+            p_low, p_high = float(preview.min()), float(preview.max())
 
-        p_low  = np.percentile(opg, 1)
-        p_high = np.percentile(opg, 99)
-        opg_c  = np.clip(opg, p_low, p_high)
+        preview_c = np.clip(preview, p_low, p_high)
         if p_high > p_low:
-            opg_norm = ((opg_c - p_low) / (p_high - p_low) * 255).astype(np.uint8)
+            opg_norm = ((preview_c - p_low) / (p_high - p_low) * 255).astype(np.uint8)
         else:
-            opg_norm = np.zeros_like(opg, dtype=np.uint8)
+            opg_norm = np.zeros((H, W), dtype=np.uint8)
 
     img = Image.fromarray(opg_norm, mode="L")
     buf = io.BytesIO()
