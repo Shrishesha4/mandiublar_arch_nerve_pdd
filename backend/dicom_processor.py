@@ -769,14 +769,17 @@ def generate_cbct_cpr(
         x_coords = np.array(sorted(arch_y_raw.keys()), dtype=np.float64)
         y_coords = np.array([arch_y_raw[int(x)] for x in x_coords], dtype=np.float64)
 
+        # Interpolate across FULL width, then smooth + spline
+        ridge_interp = np.interp(np.arange(W), x_coords, y_coords)
+        ridge_interp = ndimage.gaussian_filter1d(ridge_interp, 4)
+
         try:
-            spline = UnivariateSpline(x_coords, y_coords, s=len(x_coords) * 2, k=3)
+            spline = UnivariateSpline(np.arange(W), ridge_interp, s=50)
         except Exception:
             return _coronal_mip_fallback(volume, H, W), []
 
         num_arch_points = 200
-        x_min, x_max = float(x_coords.min()), float(x_coords.max())
-        x_sampled = np.linspace(x_min, x_max, num_arch_points)
+        x_sampled = np.linspace(0, W - 1, num_arch_points)
         y_sampled = spline(x_sampled)
         y_sampled = np.clip(y_sampled, 0, H - 1)
 
