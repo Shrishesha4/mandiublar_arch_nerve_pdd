@@ -22,8 +22,7 @@ import SimpleITK as sitk
 from scipy import ndimage
 from scipy import signal
 from scipy.interpolate import UnivariateSpline
-from scipy.interpolate import UnivariateSpline
-from skimage.feature import canny
+from skimage.feature import canny, hessian_matrix, hessian_matrix_eigvals
 from skimage.filters import frangi
 from skimage.morphology import skeletonize, remove_small_objects
 from PIL import Image
@@ -554,25 +553,154 @@ def detect_dental_arch(volume: np.ndarray, metadata: dict) -> np.ndarray:
 
 def _select_mandibular_axial_slice(volume: np.ndarray) -> tuple[int, np.ndarray]:
     """
-    Select the axial level with the strongest high-density mandibular signal,
-    then average nearby slices to reduce local noise.
+    Select the axial level with the strongest mandibular bone signal.
+
+    Only searches the middle 50% of slices (25%–75%) to avoid skull cap
+    and neck regions that would confuse detection. Uses adaptive
+    percentile thresholding that works across scanner vendors.
     """
-    n_slices = int(volume.shape[0])
-    if n_slices <= 1:
+    n = int(volume.shape[0])
+    if n <= 1:
         return 0, volume[0].astype(np.float64)
 
-    scores: list[float] = []
-    for z in range(n_slices):
-        slice_img = volume[z].astype(np.float64)
-        threshold = float(np.percentile(slice_img, 80))
-        bone_pixels = float(np.sum(slice_img > threshold))
-        scores.append(bone_pixels)
+    start = int(n * 0.25)
+    end = int(n * 0.75)
 
-    best_slice = int(np.argmax(np.asarray(scores, dtype=np.float64)))
+    scores: list[float] = []
+    for z in range(start, end):
+        img = volume[z].astype(np.float64)
+        low = float(np.percentile(img, 70))
+        high = float(np.percentile(img, 90))
+        thresh = low + 0.6 * (high - low)
+        bone = img > thresh
+        scores.append(float(bone.sum()))
+
+    best_local = int(np.argmax(np.asarray(scores, dtype=np.float64)))
+    best_slice = start + best_local
+
     z0 = max(0, best_slice - 2)
-    z1 = min(n_slices, best_slice + 3)
+    z1 = min(n, best_slice + 3)
     axial = np.mean(volume[z0:z1].astype(np.float64), axis=0)
     return best_slice, axial
+
+
+def detect_mandible_3d(volume: np.ndarray) -> np.ndarray:
+    """
+    Isolate the mandible from skull, spine, and soft tissue in a 3D
+    CBCT volume using connected-component analysis.
+
+    Returns a boolean mask of the largest bony structure (mandible).
+    """
+    low = float(np.percentile(volume, 70))
+    high = float(np.percentile(volume, 90))
+    thresh = low + 0.6 * (high - low)
+
+    bone = volume > thresh
+    bone = ndimage.binary_closing(bone, iterations=2)
+
+    labels, n_comp = ndimage.label(bone)
+    if n_comp == 0:
+        return bone.astype(bool)
+
+    sizes = ndimage.sum(bone, labels, range(1, n_comp + 1))
+    largest = int(np.argmax(np.asarray(sizes, dtype=np.float64))) + 1
+    mandible = labels == largest
+    return mandible.astype(bool)
+
+
+def extract_mandibular_arch(axial: np.ndarray) -> np.ndarray | None:
+    """
+    Professional mandibular arch extraction.
+
+    1) Normalize and threshold bone
+    2) Morphological cleanup + largest component
+    3) Extract ridge using median of top-6 bone pixels per column
+    4) Interpolate gaps, smooth, and fit spline
+    5) Return (200, 2) array of (y, x) arch coordinates
+
+    Returns None if arch cannot be reliably detected.
+    """
+    img = axial.astype(np.float32)
+    img -= img.min()
+    img /= (img.max() + 1e-6)
+
+    low = float(np.percentile(img, 70))
+    high = float(np.percentile(img, 90))
+    thresh = low + 0.55 * (high - low)
+
+    bone = img > thresh
+    bone = ndimage.binary_closing(bone, iterations=3)
+    bone = ndimage.binary_fill_holes(bone)
+
+    labels, n_comp = ndimage.label(bone)
+    if n_comp > 1:
+        sizes = ndimage.sum(bone, labels, range(1, n_comp + 1))
+        bone = (labels == (int(np.argmax(np.asarray(sizes, dtype=np.float64))) + 1))
+    elif n_comp == 0:
+        return None
+
+    H, W = bone.shape
+    ridge = np.full(W, np.nan)
+
+    for x in range(W):
+        rows = np.where(bone[:, x])[0]
+        if len(rows) > 6:
+            ridge[x] = float(np.median(rows[:6]))
+
+    valid = np.where(~np.isnan(ridge))[0]
+    if len(valid) < 20:
+        return None
+
+    ridge = np.interp(np.arange(W), valid, ridge[valid])
+    ridge = ndimage.gaussian_filter1d(ridge, 4)
+
+    spline = UnivariateSpline(np.arange(W), ridge, s=50)
+    xs = np.linspace(0, W - 1, 200)
+    ys = spline(xs)
+    ys = np.clip(ys, 0, H - 1)
+
+    arch = np.stack([ys, xs], axis=1)
+    return arch
+
+
+def detect_canal_hessian(volume: np.ndarray) -> np.ndarray:
+    """
+    Detect the mandibular canal using Hessian-based dark-tube detection.
+
+    Superior to Frangi for canal detection because it explicitly targets
+    the radiolucent tubular structure of the canal.
+
+    Returns (N, 2) array of (row, col) canal coordinates.
+    """
+    if volume.ndim == 3:
+        mid = volume[volume.shape[0] // 2]
+    else:
+        mid = volume
+
+    img = mid.astype(np.float32)
+    img -= img.min()
+    img /= (img.max() + 1e-6)
+
+    # Canal is radiolucent (dark) — invert
+    dark = 1.0 - img
+
+    # Bandpass filter to isolate tubular structures
+    low = ndimage.gaussian_filter(dark, 1)
+    high = ndimage.gaussian_filter(dark, 4)
+    band = np.clip(low - high, 0, 1)
+
+    # Hessian eigenvalue analysis for tubular structures
+    Hmatrix = hessian_matrix(band, sigma=2, order="xy", use_gaussian_derivatives=False)
+    eig1, eig2 = hessian_matrix_eigvals(Hmatrix)
+
+    # Tubular structures have one large eigenvalue
+    tube = np.abs(eig2)
+    thresh = float(np.percentile(tube, 90))
+    canal = tube > thresh
+
+    canal = skeletonize(canal)
+    coords = np.argwhere(canal)
+    return coords
 
 
 def generate_cbct_cpr(
@@ -582,13 +710,12 @@ def generate_cbct_cpr(
     Curved Planar Reconstruction (CPR) for CBCT implant planning.
 
     Pipeline:
-      1) Select mid-axial slice
-      2) Segment mandible
-      3) Extract dental arch (alveolar ridge) upper boundary
-      4) Fit smooth spline through arch points
-      5) Generate perpendicular cross-sections via map_coordinates
-      6) Stack into panoramic reconstruction image
-      7) Return arch overlay points for the frontend
+      1) 3D mandible isolation (remove skull/neck)
+      2) Auto-select mandibular axial slice
+      3) Professional arch extraction (median-of-top-6 ridge)
+      4) Perpendicular cross-sections via 3D map_coordinates
+      5) Stack into panoramic reconstruction
+      6) Return arch overlay points for frontend
 
     Returns:
         (cpr_base64, arch_points)
@@ -597,50 +724,61 @@ def generate_cbct_cpr(
     """
     n_slices, H, W = volume.shape
 
-    # ── Step 1: Auto-select mandibular slice and smooth across neighbors ─
-    best_idx, axial = _select_mandibular_axial_slice(volume)
+    # ── Step 1: 3D mandible isolation ────────────────────────────────────
+    mandible_3d = detect_mandible_3d(volume)
+    # Apply mandible mask to volume to remove skull interference
+    masked_volume = volume.copy()
+    masked_volume[~mandible_3d] = 0
+    print("3D mandible mask voxels:", int(mandible_3d.sum()))
+
+    # ── Step 2: Auto-select mandibular slice ─────────────────────────────
+    best_idx, axial = _select_mandibular_axial_slice(masked_volume)
     print("Selected mandibular slice index:", best_idx)
 
-    # ── Step 2: Segment mandible ─────────────────────────────────────────
-    mandible_mask = _segment_mandible_2d(axial)
-    if not mandible_mask.any():
-        # Fallback: use intensity threshold directly
-        threshold = np.percentile(axial, 75)
-        mandible_mask = axial > threshold
-        mandible_mask = ndimage.binary_closing(mandible_mask, iterations=3)
-        mandible_mask = ndimage.binary_fill_holes(mandible_mask)
+    # ── Step 3: Professional arch extraction ─────────────────────────────
+    arch_result = extract_mandibular_arch(axial)
 
-    # ── Step 3: Extract dental arch (alveolar ridge) ─────────────────────
-    # For each column, find the topmost bone pixel → upper ridge boundary
-    arch_y_raw = {}
-    cols_with_bone = np.where(mandible_mask.any(axis=0))[0]
+    if arch_result is not None:
+        # arch_result is (200, 2) array of (y, x) coordinates
+        ys_arch = arch_result[:, 0]
+        xs_arch = arch_result[:, 1]
+        num_arch_points = len(xs_arch)
+        x_sampled = xs_arch
+        y_sampled = ys_arch
+        print("Professional arch extraction: %d points" % num_arch_points)
+    else:
+        # Fallback: old method using _segment_mandible_2d
+        print("Arch extraction fallback: using _segment_mandible_2d")
+        mandible_mask = _segment_mandible_2d(axial)
+        if not mandible_mask.any():
+            threshold = np.percentile(axial, 75)
+            mandible_mask = axial > threshold
+            mandible_mask = ndimage.binary_closing(mandible_mask, iterations=3)
+            mandible_mask = ndimage.binary_fill_holes(mandible_mask)
 
-    for x in cols_with_bone:
-        rows = np.where(mandible_mask[:, x])[0]
-        if len(rows) > 0:
-            arch_y_raw[int(x)] = int(rows.min())
+        arch_y_raw = {}
+        cols_with_bone = np.where(mandible_mask.any(axis=0))[0]
+        for x in cols_with_bone:
+            rows = np.where(mandible_mask[:, x])[0]
+            if len(rows) > 0:
+                arch_y_raw[int(x)] = int(rows.min())
 
-    if len(arch_y_raw) < 20:
-        # Not enough arch points: return a coronal MIP fallback
-        return _coronal_mip_fallback(volume, H, W), []
+        if len(arch_y_raw) < 20:
+            return _coronal_mip_fallback(volume, H, W), []
 
-    x_coords = np.array(sorted(arch_y_raw.keys()), dtype=np.float64)
-    y_coords = np.array([arch_y_raw[int(x)] for x in x_coords], dtype=np.float64)
+        x_coords = np.array(sorted(arch_y_raw.keys()), dtype=np.float64)
+        y_coords = np.array([arch_y_raw[int(x)] for x in x_coords], dtype=np.float64)
 
-    # ── Step 4: Fit smooth spline ────────────────────────────────────────
-    try:
-        # s controls smoothness; larger = smoother
-        spline = UnivariateSpline(x_coords, y_coords, s=len(x_coords) * 2, k=3)
-    except Exception:
-        # Fallback to linear interpolation if spline fails
-        return _coronal_mip_fallback(volume, H, W), []
+        try:
+            spline = UnivariateSpline(x_coords, y_coords, s=len(x_coords) * 2, k=3)
+        except Exception:
+            return _coronal_mip_fallback(volume, H, W), []
 
-    # Sample evenly-spaced points along the arch spline
-    num_arch_points = 200
-    x_min, x_max = float(x_coords.min()), float(x_coords.max())
-    x_sampled = np.linspace(x_min, x_max, num_arch_points)
-    y_sampled = spline(x_sampled)
-    y_sampled = np.clip(y_sampled, 0, H - 1)
+        num_arch_points = 200
+        x_min, x_max = float(x_coords.min()), float(x_coords.max())
+        x_sampled = np.linspace(x_min, x_max, num_arch_points)
+        y_sampled = spline(x_sampled)
+        y_sampled = np.clip(y_sampled, 0, H - 1)
 
     # Build arch overlay points for frontend
     arch_points = [
