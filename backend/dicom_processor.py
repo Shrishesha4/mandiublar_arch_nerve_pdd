@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import io
 import base64
+import re
 import shutil
 import tempfile
 import zipfile
@@ -20,6 +21,7 @@ import pydicom
 import SimpleITK as sitk
 from scipy import ndimage
 from scipy import signal
+from scipy.interpolate import UnivariateSpline
 from scipy.interpolate import UnivariateSpline
 from skimage.feature import canny
 from skimage.filters import frangi
@@ -195,11 +197,12 @@ def _load_cbct_series_from_dir(root: Path) -> tuple[np.ndarray, dict]:
     )
     if not dicom_files:
         raise ValueError("No .dcm files found in CBCT study input.")
-    print("Found", len(dicom_files), "DICOM slices")
+    print("DICOM files found:", len(dicom_files))
 
     slices = []
     rows = None
     cols = None
+    fallback_used = False
 
     for fallback_idx, file_path in enumerate(dicom_files):
         print("Reading DICOM:", str(file_path))
@@ -210,7 +213,8 @@ def _load_cbct_series_from_dir(root: Path) -> tuple[np.ndarray, dict]:
 
         try:
             arr = ds.pixel_array
-        except Exception:
+        except Exception as e:
+            print("Pixel decode failed:", e)
             continue
 
         # Enhanced/multi-frame CBCT may store the full volume in one file.
@@ -265,28 +269,27 @@ def _load_cbct_series_from_dir(root: Path) -> tuple[np.ndarray, dict]:
         instance_number = None
         if hasattr(ds, "InstanceNumber"):
             try:
-                instance_number = float(ds.InstanceNumber)
+                instance_number = int(ds.InstanceNumber)
             except Exception:
                 instance_number = None
 
-        if z_pos is not None:
-            sort_key = (0, z_pos)
-        elif instance_number is not None:
-            sort_key = (1, instance_number)
-        else:
-            sort_key = (2, float(fallback_idx))
+        name_numbers = re.findall(r"\d+", file_path.name)
+        file_number = int(name_numbers[-1]) if name_numbers else fallback_idx
 
         slices.append(
             {
                 "arr": arr,
                 "ds": ds,
                 "z": z_pos,
-                "sort_key": sort_key,
+                "instance": instance_number,
+                "file_number": file_number,
+                "file_name": file_path.name,
             }
         )
 
     if not slices:
         print("No slices decoded -- trying SimpleITK fallback")
+        fallback_used = True
         sitk_volume, sitk_ds = _load_cbct_with_sitk_fallback(root)
         if sitk_volume is not None and sitk_ds is not None:
             modality = str(getattr(sitk_ds, "Modality", "")).upper() or "UNKNOWN"
@@ -300,13 +303,29 @@ def _load_cbct_series_from_dir(root: Path) -> tuple[np.ndarray, dict]:
                 "modality": modality,
                 "is_calibrated_hu": modality == "CT",
             }
+            print("Fallback used:", fallback_used)
             return sitk_volume, metadata
         raise ValueError("No readable 2D DICOM slices found in CBCT study input.")
 
     if len(slices) < 5:
         raise ValueError("Not enough valid CBCT slices")
 
-    slices.sort(key=lambda s: s["sort_key"])
+    print("Slices decoded with pydicom:", len(slices))
+    print("Fallback used:", fallback_used)
+
+    has_all_z = all(s["z"] is not None for s in slices)
+    has_all_instance = all(s["instance"] is not None for s in slices)
+    if has_all_z:
+        slices.sort(key=lambda s: float(s["z"]))
+    elif has_all_instance:
+        slices.sort(key=lambda s: int(s["instance"]))
+    else:
+        slices.sort(key=lambda s: int(s["file_number"]))
+
+    if slices[0]["z"] is not None and slices[-1]["z"] is not None:
+        print("First slice Z:", slices[0]["z"])
+        print("Last slice Z:", slices[-1]["z"])
+
     volume = np.stack([s["arr"] for s in slices], axis=0)
 
     if volume.shape[0] > 600:
@@ -413,6 +432,82 @@ def _get_pixel_spacing(ds) -> list[float]:
     return [1.0, 1.0]
 
 
+def build_cbct_panoramic_proxy(
+    volume: np.ndarray,
+    metadata: dict,
+) -> tuple[np.ndarray, dict, np.ndarray, list[dict]]:
+    """
+    Convert a volumetric CBCT stack into a stable panoramic-like 2D proxy for
+    ridge analysis.
+
+    Returns
+    -------
+    proxy_volume : np.ndarray
+        Shape (1, H, W), float64 in [0, 255].
+    proxy_metadata : dict
+        Metadata aligned to proxy_volume.
+    bone_mask_2d : np.ndarray
+        Binary mask of dominant mandibular component in proxy image.
+    ridge_points : list[dict]
+        Smoothed alveolar ridge polyline points as [{"x": int, "y": int}, ...].
+    """
+    if volume.ndim != 3 or volume.shape[0] <= 1:
+        raise ValueError("CBCT panoramic proxy requires volumetric input (Z, Y, X).")
+
+    projection = np.max(volume, axis=0).astype(np.float64)
+    projection = ndimage.gaussian_filter(projection, sigma=2.0)
+
+    threshold = float(np.percentile(projection, 75))
+    bone_mask = projection > threshold
+    bone_mask = ndimage.binary_closing(bone_mask, iterations=2)
+    bone_mask = ndimage.binary_fill_holes(bone_mask)
+    bone_mask = remove_small_objects(bone_mask.astype(bool), min_size=500)
+
+    labelled, n_comp = ndimage.label(bone_mask)
+    if n_comp > 0:
+        sizes = ndimage.sum(bone_mask, labelled, index=range(1, n_comp + 1))
+        best_idx = int(np.argmax(np.asarray(sizes, dtype=np.float64))) + 1
+        bone_mask = labelled == best_idx
+    else:
+        bone_mask = np.zeros_like(bone_mask, dtype=bool)
+
+    H, W = projection.shape
+    ridge = np.full(W, np.nan, dtype=np.float64)
+    for x in range(W):
+        rows = np.where(bone_mask[:, x])[0]
+        if len(rows) > 0:
+            ridge[x] = float(rows.min())
+
+    valid_x = np.where(~np.isnan(ridge))[0]
+    ridge_points: list[dict] = []
+    if len(valid_x) >= 6:
+        ridge_interp = np.interp(np.arange(W), valid_x, ridge[valid_x])
+        spline = UnivariateSpline(np.arange(W), ridge_interp, s=50.0)
+        sample_x = np.linspace(0, W - 1, 150)
+        sample_y = np.clip(spline(sample_x), 0, H - 1)
+        ridge_points = [
+            {"x": int(round(x)), "y": int(round(y))}
+            for x, y in zip(sample_x, sample_y)
+        ]
+
+    p1 = float(np.percentile(projection, 1))
+    p99 = float(np.percentile(projection, 99))
+    if p99 <= p1:
+        projection_u8 = np.zeros_like(projection, dtype=np.uint8)
+    else:
+        projection = np.clip(projection, p1, p99)
+        projection_u8 = ((projection - p1) / (p99 - p1) * 255.0).astype(np.uint8)
+
+    proxy_volume = projection_u8[np.newaxis, :, :].astype(np.float64)
+    proxy_metadata = dict(metadata)
+    proxy_metadata["rows"] = int(proxy_volume.shape[1])
+    proxy_metadata["columns"] = int(proxy_volume.shape[2])
+    proxy_metadata["num_slices"] = 1
+    proxy_metadata["slice_thickness"] = 1.0
+    proxy_metadata["is_calibrated_hu"] = False
+    return proxy_volume, proxy_metadata, bone_mask.astype(bool), ridge_points
+
+
 # ======================================================================
 # OPG (Panoramic Projection)
 # ======================================================================
@@ -457,6 +552,29 @@ def detect_dental_arch(volume: np.ndarray, metadata: dict) -> np.ndarray:
     return coords[::step]
 
 
+def _select_mandibular_axial_slice(volume: np.ndarray) -> tuple[int, np.ndarray]:
+    """
+    Select the axial level with the strongest high-density mandibular signal,
+    then average nearby slices to reduce local noise.
+    """
+    n_slices = int(volume.shape[0])
+    if n_slices <= 1:
+        return 0, volume[0].astype(np.float64)
+
+    scores: list[float] = []
+    for z in range(n_slices):
+        slice_img = volume[z].astype(np.float64)
+        threshold = float(np.percentile(slice_img, 80))
+        bone_pixels = float(np.sum(slice_img > threshold))
+        scores.append(bone_pixels)
+
+    best_slice = int(np.argmax(np.asarray(scores, dtype=np.float64)))
+    z0 = max(0, best_slice - 2)
+    z1 = min(n_slices, best_slice + 3)
+    axial = np.mean(volume[z0:z1].astype(np.float64), axis=0)
+    return best_slice, axial
+
+
 def generate_cbct_cpr(
     volume: np.ndarray, metadata: dict
 ) -> tuple[str, list[dict]]:
@@ -479,9 +597,9 @@ def generate_cbct_cpr(
     """
     n_slices, H, W = volume.shape
 
-    # ── Step 1: Mid-axial slice ──────────────────────────────────────────
-    mid_idx = n_slices // 2
-    axial = volume[mid_idx].astype(np.float64)
+    # ── Step 1: Auto-select mandibular slice and smooth across neighbors ─
+    best_idx, axial = _select_mandibular_axial_slice(volume)
+    print("Selected mandibular slice index:", best_idx)
 
     # ── Step 2: Segment mandible ─────────────────────────────────────────
     mandible_mask = _segment_mandible_2d(axial)

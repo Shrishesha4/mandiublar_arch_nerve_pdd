@@ -3,6 +3,13 @@ uvicorn==0.34.0
 pydicom==3.0.1
 SimpleITK==2.4.1
 numpy==2.2.1
+scipy
 scikit-image==0.25.0
 python-multipart==0.0.20
+
+pylibjpeg
+pylibjpeg-libjpeg
+pylibjpeg-openjpeg
+python-gdcm
+dicomsdl
 

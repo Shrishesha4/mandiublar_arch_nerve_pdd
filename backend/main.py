@@ -21,12 +21,14 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from PIL import Image
 import pydicom
+from pydicom import config as pydicom_config
 from pydantic import BaseModel
 
 from auth_db import AuthDatabase
 from dicom_processor import (
     load_dicom_volume,
     load_cbct_zip,
+    build_cbct_panoramic_proxy,
     load_image_projection,
     generate_opg,
     get_last_cpr_arch_points,
@@ -40,6 +42,7 @@ from segmentation_model import UNetSegmentor, extract_nerve_path_2d
 # ---------- Logging ----------
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("implant-api")
+logger.info("Available pydicom pixel handlers: %s", pydicom_config.pixel_data_handlers)
 
 # ---------- App ----------
 app = FastAPI(
@@ -348,23 +351,26 @@ def _analyze_loaded_volume(
     tooth_y: Optional[int],
     workflow: str,
 ) -> AnalysisResponse:
+    dataset_type = "volumetric_cbct" if int(volume.shape[0]) > 1 else "2d_radiograph"
+    analysis_volume = volume
+    analysis_metadata = metadata
+    cbct_ridge_path: list[dict] = []
 
-    logger.info(
-        "Volume loaded: shape=%s, spacing=%s, patient=%s",
-        volume.shape,
-        metadata["pixel_spacing"],
-        metadata["patient_name"],
-    )
-
-    try:
-        opg_b64 = generate_opg(volume, metadata)
-    except Exception:
-        logger.exception("OPG generation failed")
-        opg_b64 = ""
-
-    if workflow == "cbct_implant":
+    if workflow == "cbct_implant" and dataset_type == "volumetric_cbct":
+        analysis_volume, analysis_metadata, cbct_bone_2d, cbct_ridge_path = build_cbct_panoramic_proxy(
+            volume,
+            metadata,
+        )
+        bone_mask = cbct_bone_2d[np.newaxis, :, :].astype(bool)
+        nerve_mask = np.zeros_like(bone_mask, dtype=bool)
+        if cbct_ridge_path:
+            mid_pt = cbct_ridge_path[len(cbct_ridge_path) // 2]
+            mandible_center = (int(mid_pt["y"]), int(mid_pt["x"]))
+        else:
+            mandible_center = None
+    elif workflow == "cbct_implant":
         try:
-            seg_result = segmentor.predict(volume)
+            seg_result = segmentor.predict(analysis_volume)
             bone_mask = seg_result.get("bone_mask")
             nerve_mask = seg_result.get("nerve_mask")
             mandible_center = seg_result.get("mandible_center", None)
@@ -373,24 +379,37 @@ def _analyze_loaded_volume(
             nerve_mask = None
             mandible_center = None
     else:
-        seg_result = segmentor.predict(volume)
+        seg_result = segmentor.predict(analysis_volume)
         bone_mask = seg_result["bone_mask"]
         nerve_mask = seg_result["nerve_mask"]
         mandible_center = seg_result.get("mandible_center", None)
+
+    logger.info(
+        "Volume loaded: shape=%s, spacing=%s, patient=%s",
+        analysis_volume.shape,
+        analysis_metadata["pixel_spacing"],
+        analysis_metadata["patient_name"],
+    )
+
+    try:
+        opg_b64 = generate_opg(analysis_volume, analysis_metadata)
+    except Exception:
+        logger.exception("OPG generation failed")
+        opg_b64 = ""
 
     if workflow == "cbct_implant":
         bone_mask = np.asarray(bone_mask, dtype=bool) if bone_mask is not None else None
         nerve_mask = np.asarray(nerve_mask, dtype=bool) if nerve_mask is not None else None
 
-        if not _masks_match_volume(volume, bone_mask, nerve_mask):
-            bone_mask, nerve_mask = create_default_masks(volume)
+        if not _masks_match_volume(analysis_volume, bone_mask, nerve_mask):
+            bone_mask, nerve_mask = create_default_masks(analysis_volume)
 
-        print("CBCT volume shape:", volume.shape)
-        print("Pixel spacing:", metadata.get("pixel_spacing"))
+        print("CBCT volume shape:", analysis_volume.shape)
+        print("Pixel spacing:", analysis_metadata.get("pixel_spacing"))
         print("Bone mask shape:", bone_mask.shape)
         print("Nerve mask shape:", nerve_mask.shape)
 
-        if bone_mask.shape != volume.shape or nerve_mask.shape != volume.shape:
+        if bone_mask.shape != analysis_volume.shape or nerve_mask.shape != analysis_volume.shape:
             raise ValueError("Mask shape mismatch")
 
         print("Bone mask voxels:", int(bone_mask.sum()))
@@ -401,7 +420,7 @@ def _analyze_loaded_volume(
     if tooth_x is not None and tooth_y is not None:
         tooth_coords = {"x": tooth_x, "y": tooth_y}
     else:
-        auto_site = select_default_measurement_site(volume, bone_mask, nerve_mask)
+        auto_site = select_default_measurement_site(analysis_volume, bone_mask, nerve_mask)
         if auto_site is not None:
             tooth_coords = auto_site
         elif mandible_center is not None:
@@ -409,28 +428,29 @@ def _analyze_loaded_volume(
 
     if workflow == "cbct_implant":
         bone_metrics = calculate_bone_metrics(
-            volume, bone_mask, nerve_mask, metadata, tooth_coords
+            analysis_volume, bone_mask, nerve_mask, analysis_metadata, tooth_coords
         )
         print("Analysis complete")
         print("Bone width:", bone_metrics.get("width_mm"))
         print("Bone height:", bone_metrics.get("height_mm"))
     else:
         bone_metrics = calculate_bone_metrics(
-            volume, bone_mask, nerve_mask, metadata, tooth_coords
+            analysis_volume, bone_mask, nerve_mask, analysis_metadata, tooth_coords
         )
     if workflow == "panoramic_mandibular_canal":
-        nerve_path = detect_mandibular_canal_path_2d(volume, metadata)
+        nerve_path = detect_mandibular_canal_path_2d(analysis_volume, analysis_metadata)
     else:
         nerve_path = extract_nerve_path_2d(
             nerve_mask,
             bone_mask=bone_mask,
             preferred_x=bone_metrics["measurement_location"]["x"],
         )
-    planning_overlay = build_planning_overlay(volume, bone_mask, bone_metrics)
+    planning_overlay = build_planning_overlay(analysis_volume, bone_mask, bone_metrics)
 
-    # For CBCT, use the arch points from the CPR pipeline (generated during
-    # generate_opg) instead of the planning overlay outer contour.
-    if workflow == "cbct_implant":
+    # For CBCT, prefer ridge extracted from panoramic proxy reconstruction.
+    if workflow == "cbct_implant" and cbct_ridge_path:
+        arch_pts = cbct_ridge_path
+    elif workflow == "cbct_implant" and int(analysis_volume.shape[0]) > 1:
         cpr_arch = get_last_cpr_arch_points()
         arch_pts = cpr_arch if cpr_arch else planning_overlay["outer_contour"]
     else:
@@ -438,17 +458,15 @@ def _analyze_loaded_volume(
 
     session_id = str(uuid.uuid4())
     _volume_cache[session_id] = {
-        "volume": volume,
+        "volume": analysis_volume,
         "bone_mask": bone_mask,
         "nerve_mask": nerve_mask,
-        "metadata": metadata,
+        "metadata": analysis_metadata,
         "workflow": workflow,
     }
     if len(_volume_cache) > 5:
         oldest = next(iter(_volume_cache))
         del _volume_cache[oldest]
-
-    dataset_type = "volumetric_cbct" if int(metadata.get("num_slices", 1)) >= 20 else "2d_radiograph"
 
     return AnalysisResponse(
         session_id=session_id,
@@ -477,15 +495,15 @@ def _analyze_loaded_volume(
         ),
         bone_metrics=BoneMetrics(**bone_metrics),
         metadata={
-            "pixel_spacing": metadata["pixel_spacing"],
-            "slice_thickness": metadata["slice_thickness"],
-            "rows": metadata["rows"],
-            "columns": metadata["columns"],
-            "num_slices": metadata["num_slices"],
-            "patient_name": metadata.get("patient_name", "Unknown"),
+            "pixel_spacing": analysis_metadata["pixel_spacing"],
+            "slice_thickness": analysis_metadata["slice_thickness"],
+            "rows": analysis_metadata["rows"],
+            "columns": analysis_metadata["columns"],
+            "num_slices": analysis_metadata["num_slices"],
+            "patient_name": analysis_metadata.get("patient_name", "Unknown"),
             "dataset_type": dataset_type,
-            "modality": metadata.get("modality", "UNKNOWN"),
-            "is_calibrated_hu": bool(metadata.get("is_calibrated_hu", False)),
+            "modality": analysis_metadata.get("modality", "UNKNOWN"),
+            "is_calibrated_hu": bool(analysis_metadata.get("is_calibrated_hu", False)),
         },
     )
 
