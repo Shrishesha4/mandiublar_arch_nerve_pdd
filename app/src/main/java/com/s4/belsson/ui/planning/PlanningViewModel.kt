@@ -255,7 +255,8 @@ class PlanningViewModel(application: Application) : AndroidViewModel(application
         return reportGenerator.generateReport(
             analysis = preferred,
             opgBitmap = preferredBitmap,
-            toothLabel = toothLabel
+            toothLabel = toothLabel,
+            tapMetrics = _tapMetrics.value
         )
     }
 

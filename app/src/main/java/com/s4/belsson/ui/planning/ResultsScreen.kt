@@ -185,30 +185,30 @@ fun ResultsScreen(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(12.dp)
             ) {
-                Button(
-                    onClick = {
-                        val file = onGenerateReport()
-                        if (file != null) {
-                            val uri = FileProvider.getUriForFile(
-                                context,
-                                "${context.packageName}.fileprovider",
-                                file
-                            )
-                            val intent = Intent(Intent.ACTION_VIEW).apply {
-                                setDataAndType(uri, "application/pdf")
-                                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                            }
-                            try {
-                                context.startActivity(intent)
-                            } catch (_: Exception) {
-                                Toast.makeText(context, "PDF saved: ${file.name}", Toast.LENGTH_LONG).show()
-                            }
-                        }
-                    },
-                    modifier = Modifier.weight(1f)
-                ) {
-                    Text("Generate Report")
-                }
+//                Button(
+//                    onClick = {
+//                        val file = onGenerateReport()
+//                        if (file != null) {
+//                            val uri = FileProvider.getUriForFile(
+//                                context,
+//                                "${context.packageName}.fileprovider",
+//                                file
+//                            )
+//                            val intent = Intent(Intent.ACTION_VIEW).apply {
+//                                setDataAndType(uri, "application/pdf")
+//                                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+//                            }
+//                            try {
+//                                context.startActivity(intent)
+//                            } catch (_: Exception) {
+//                                Toast.makeText(context, "PDF saved: ${file.name}", Toast.LENGTH_LONG).show()
+//                            }
+//                        }
+//                    },
+//                    modifier = Modifier.weight(1f)
+//                ) {
+//                    Text("Generate Report")
+//                }
 
                 OutlinedButton(
                     onClick = onReset,

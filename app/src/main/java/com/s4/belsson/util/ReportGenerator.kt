@@ -4,6 +4,7 @@ import android.content.Context
 import android.graphics.*
 import android.graphics.pdf.PdfDocument
 import com.s4.belsson.data.model.AnalysisResponse
+import com.s4.belsson.data.model.BoneMetrics
 import java.io.File
 import java.io.FileOutputStream
 import java.text.SimpleDateFormat
@@ -69,7 +70,8 @@ class ReportGenerator(private val context: Context) {
     fun generateReport(
         analysis: AnalysisResponse,
         opgBitmap: Bitmap?,
-        toothLabel: String = "Tooth 36"
+        toothLabel: String = "Tooth 36",
+        tapMetrics: BoneMetrics? = null
     ): File {
         document = PdfDocument()
         newPage()
@@ -156,6 +158,92 @@ class ReportGenerator(private val context: Context) {
             y += 20f
         }
         y += 16f
+
+        // ── Tapped Region Measurements (if available) ─────────────────────────
+        if (tapMetrics != null) {
+            val tapRows = listOf(
+                "Bone Width" to "${String.format(Locale.US, "%.2f", tapMetrics.widthMm)} mm",
+                "Bone Height" to "${String.format(Locale.US, "%.2f", tapMetrics.heightMm)} mm",
+                "Safe Height (−2 mm)" to "${String.format(Locale.US, "%.2f", tapMetrics.safeHeightMm)} mm",
+                "Safety Margin" to "${String.format(Locale.US, "%.2f", tapMetrics.safetyMarginMm)} mm",
+                "Bone Density (est.)" to "${String.format(Locale.US, "%.1f", tapMetrics.densityEstimateHu)} HU"
+            )
+            val tapCardHeight = tapRows.size * 20f + 12f
+            ensureSpace(30f + tapCardHeight)
+            sectionHeader("Tapped Region Measurement")
+
+            val tapCardTop = y
+            draw { c ->
+                val cardPaint = Paint().apply {
+                    color = Color.parseColor("#FFF3E0")
+                    style = Paint.Style.FILL
+                }
+                val borderPaint = Paint().apply {
+                    color = Color.parseColor("#FFE0B2")
+                    style = Paint.Style.STROKE
+                    strokeWidth = 1f
+                }
+                val rect = RectF(MARGIN, tapCardTop, PAGE_WIDTH - MARGIN, tapCardTop + tapCardHeight)
+                c.drawRoundRect(rect, 6f, 6f, cardPaint)
+                c.drawRoundRect(rect, 6f, 6f, borderPaint)
+            }
+            y += 10f
+            tapRows.forEach { (label, value) ->
+                draw { c ->
+                    c.drawText(label, MARGIN + 12f, y, labelPaint)
+                    c.drawText(value, MARGIN + 220f, y, bodyPaint)
+                }
+                y += 20f
+            }
+            y += 16f
+
+            // Tap safety assessment
+            val tapSafetyColor = when (tapMetrics.safetyStatus.lowercase()) {
+                "safe" -> Color.parseColor("#2E7D32")
+                "danger" -> Color.parseColor("#C62828")
+                else -> Color.parseColor("#E65100")
+            }
+            val tapSafetyIcon = when (tapMetrics.safetyStatus.lowercase()) {
+                "safe" -> "SAFE"
+                "danger" -> "INSUFFICIENT BONE"
+                else -> "BORDERLINE"
+            }
+            val tapSafetyDetail = when (tapMetrics.safetyStatus.lowercase()) {
+                "safe" -> "Safe for implant placement"
+                "danger" -> "Augmentation may be needed"
+                else -> "Review site or implant size"
+            }
+            ensureSpace(40f)
+            draw { c ->
+                val badgePaint = Paint().apply {
+                    color = Color.argb(30,
+                        Color.red(tapSafetyColor), Color.green(tapSafetyColor), Color.blue(tapSafetyColor))
+                    style = Paint.Style.FILL
+                }
+                val badgeBorder = Paint().apply {
+                    color = tapSafetyColor
+                    style = Paint.Style.STROKE
+                    strokeWidth = 1.5f
+                }
+                val rect = RectF(MARGIN, y - 4f, PAGE_WIDTH - MARGIN, y + 28f)
+                c.drawRoundRect(rect, 6f, 6f, badgePaint)
+                c.drawRoundRect(rect, 6f, 6f, badgeBorder)
+            }
+            val tapStatusPaint = Paint().apply {
+                textSize = 12f
+                typeface = Typeface.DEFAULT_BOLD
+                isAntiAlias = true
+                color = tapSafetyColor
+            }
+            draw { c -> c.drawText("$tapSafetyIcon  –  $tapSafetyDetail", MARGIN + 10f, y + 16f, tapStatusPaint) }
+            y += 36f
+
+            if (tapMetrics.safetyReason.isNotBlank()) {
+                draw { c -> c.drawText(tapMetrics.safetyReason, MARGIN + 10f, y, bodyPaint) }
+                y += 18f
+            }
+            y += 12f
+        }
 
         // ── Safety Assessment ─────────────────────────────────────────────────
         ensureSpace(60f)
