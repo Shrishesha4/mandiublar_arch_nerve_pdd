@@ -33,6 +33,7 @@ import kotlin.math.sqrt
 fun JawCanvasView(
     opgBitmap: Bitmap?,
     nervePath: List<NervePathPoint>,
+    safeZonePath: List<NervePathPoint> = emptyList(),
     modifier: Modifier = Modifier,
     planningOverlay: PlanningOverlay = PlanningOverlay(),
     workflow: String = "cbct_implant",
@@ -95,6 +96,7 @@ fun JawCanvasView(
             drawPlanningOverlay(
                 overlay = planningOverlay,
                 nervePath = nervePath,
+                safeZonePath = safeZonePath,
                 workflow = workflow,
                 scaleX = imgScaleX,
                 scaleY = imgScaleY,
@@ -108,23 +110,29 @@ fun JawCanvasView(
 private fun DrawScope.drawPlanningOverlay(
     overlay: PlanningOverlay,
     nervePath: List<NervePathPoint>,
+    safeZonePath: List<NervePathPoint>,
     workflow: String,
     scaleX: Float,
     scaleY: Float,
     offsetX: Float,
     offsetY: Float,
 ) {
+    if (nervePath.isNotEmpty() && safeZonePath.isNotEmpty()) {
+        drawSafeZoneBand(
+            nervePath = nervePath,
+            safeZonePath = safeZonePath,
+            scaleX = scaleX,
+            scaleY = scaleY,
+            offsetX = offsetX,
+            offsetY = offsetY,
+        )
+    }
+
     if (workflow == "panoramic_mandibular_canal") {
         val orange = Color(0xFFFF9800)
-        val fallbackPath = when {
-            nervePath.isNotEmpty() -> nervePath
-            overlay.innerContour.isNotEmpty() -> overlay.innerContour
-            overlay.outerContour.isNotEmpty() -> overlay.outerContour
-            else -> overlay.baseGuide
-        }
-        if (fallbackPath.isNotEmpty()) {
+        if (nervePath.isNotEmpty()) {
             drawOpenPolyline(
-                points = fallbackPath,
+                points = nervePath,
                 scaleX = scaleX,
                 scaleY = scaleY,
                 offsetX = offsetX,
@@ -132,7 +140,17 @@ private fun DrawScope.drawPlanningOverlay(
                 color = orange,
                 strokeWidth = 3.2f,
             )
-            drawNerveMarkers(fallbackPath, scaleX, scaleY, offsetX, offsetY, orange)
+            drawNerveMarkers(nervePath, scaleX, scaleY, offsetX, offsetY, orange)
+            return
+        }
+
+        val fallbackPath = when {
+            overlay.innerContour.isNotEmpty() -> overlay.innerContour
+            overlay.outerContour.isNotEmpty() -> overlay.outerContour
+            else -> overlay.baseGuide
+        }
+        if (fallbackPath.isNotEmpty()) {
+            drawOpenPolyline(fallbackPath, scaleX, scaleY, offsetX, offsetY, orange, 3.2f)
         }
         return
     }
@@ -151,9 +169,36 @@ private fun DrawScope.drawPlanningOverlay(
     }
 
     // Keep subtle nerve markers only when no planning overlay is available.
+    if (nervePath.isNotEmpty()) {
+        drawOpenPolyline(nervePath, scaleX, scaleY, offsetX, offsetY, Color(0xFFFF9800), 2.2f)
+    }
     if (overlay.outerContour.isEmpty() && nervePath.isNotEmpty()) {
         drawNerveMarkers(nervePath, scaleX, scaleY, offsetX, offsetY, Color(0xFFFF9800))
     }
+}
+
+private fun DrawScope.drawSafeZoneBand(
+    nervePath: List<NervePathPoint>,
+    safeZonePath: List<NervePathPoint>,
+    scaleX: Float,
+    scaleY: Float,
+    offsetX: Float,
+    offsetY: Float,
+) {
+    if (nervePath.size < 2 || safeZonePath.size < 2) return
+    val count = minOf(nervePath.size, safeZonePath.size)
+    fun toCanvas(p: NervePathPoint) = Offset(p.x * scaleX + offsetX, p.y * scaleY + offsetY)
+    val lower = nervePath.take(count).map(::toCanvas)
+    val upper = safeZonePath.take(count).map(::toCanvas)
+    if (lower.any { !it.x.isFinite() || !it.y.isFinite() } || upper.any { !it.x.isFinite() || !it.y.isFinite() }) return
+
+    val zone = Path().apply {
+        moveTo(upper.first().x, upper.first().y)
+        upper.drop(1).forEach { lineTo(it.x, it.y) }
+        lower.asReversed().forEach { lineTo(it.x, it.y) }
+        close()
+    }
+    drawPath(path = zone, color = Color(0xFFFF9800).copy(alpha = 0.18f))
 }
 
 private fun DrawScope.drawOpenPolyline(

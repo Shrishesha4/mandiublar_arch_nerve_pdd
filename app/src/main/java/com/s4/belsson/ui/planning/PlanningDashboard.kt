@@ -25,6 +25,9 @@ fun PlanningDashboard(
     val authState by viewModel.authState.collectAsStateWithLifecycle()
     val tapMetrics by viewModel.tapMetrics.collectAsStateWithLifecycle()
     val tapOverlay by viewModel.tapOverlay.collectAsStateWithLifecycle()
+    val tapSafeZonePath by viewModel.tapSafeZonePath.collectAsStateWithLifecycle()
+    val tapRecommendationLine by viewModel.tapRecommendationLine.collectAsStateWithLifecycle()
+    val tapIanStatusMessage by viewModel.tapIanStatusMessage.collectAsStateWithLifecycle()
 
     if (authState !is AuthUiState.Authenticated) {
         AuthScreen(
@@ -63,6 +66,9 @@ fun PlanningDashboard(
                 measurementManager = state.cbctMeasurementManager,
                 tapMetrics = null,
                 tapOverlay = null,
+                tapSafeZonePath = null,
+                tapRecommendationLine = null,
+                tapIanStatusMessage = null,
                 onTapCoordinate = { _, _ -> },
                 onGenerateReport = { viewModel.generateReport() },
                 onReset = { viewModel.reset() },
@@ -83,6 +89,9 @@ fun PlanningDashboard(
                 measurementManager = state.panoramicMeasurementManager,
                 tapMetrics = tapMetrics,
                 tapOverlay = tapOverlay,
+                tapSafeZonePath = tapSafeZonePath,
+                tapRecommendationLine = tapRecommendationLine,
+                tapIanStatusMessage = tapIanStatusMessage,
                 onTapCoordinate = { x, y -> viewModel.measureAtCoordinate(x, y) },
                 onGenerateReport = { viewModel.generateReport() },
                 onReset = { viewModel.reset() },

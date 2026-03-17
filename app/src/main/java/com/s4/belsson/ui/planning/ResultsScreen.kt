@@ -34,6 +34,9 @@ fun ResultsScreen(
     measurementManager: MeasurementManager,
     tapMetrics: BoneMetrics?,
     tapOverlay: PlanningOverlay?,
+    tapSafeZonePath: List<com.s4.belsson.data.model.NervePathPoint>? = null,
+    tapRecommendationLine: String? = null,
+    tapIanStatusMessage: String? = null,
     onTapCoordinate: (x: Int, y: Int) -> Unit,
     onGenerateReport: () -> java.io.File?,
     onReset: () -> Unit,
@@ -47,6 +50,9 @@ fun ResultsScreen(
     val activeOverlay = remember(analysis.planningOverlay, tapOverlay) {
         tapOverlay ?: analysis.planningOverlay
     }
+    val activeSafeZonePath = tapSafeZonePath ?: analysis.safeZonePath
+    val activeRecommendation = tapRecommendationLine?.takeIf { it.isNotBlank() } ?: analysis.recommendationLine
+    val activeIanStatus = tapIanStatusMessage?.takeIf { it.isNotBlank() } ?: analysis.ianStatusMessage
 
     Column(
         modifier = modifier
@@ -62,6 +68,11 @@ fun ResultsScreen(
         Text(
             text = "Patient: ${analysis.patientName}",
             style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        Text(
+            text = "Scan Region: ${analysis.scanRegion.replaceFirstChar { if (it.isLowerCase()) it.titlecase() else it.toString() }}",
+            style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
         Text(
@@ -93,6 +104,7 @@ fun ResultsScreen(
                 JawCanvasView(
                     opgBitmap = opgBitmap,
                     nervePath = analysis.nervePath,
+                    safeZonePath = activeSafeZonePath,
                     planningOverlay = activeOverlay,
                     workflow = analysis.workflow,
                     onTap = onTapCoordinate
@@ -149,6 +161,14 @@ fun ResultsScreen(
                     text = "${analysis.nervePath.size} traced points",
                     style = MaterialTheme.typography.bodyMedium
                 )
+                if (activeIanStatus.isNotBlank()) {
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        text = activeIanStatus,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.85f)
+                    )
+                }
                 if (analysis.nervePath.isNotEmpty()) {
                     val first = analysis.nervePath.first()
                     val last = analysis.nervePath.last()
@@ -162,6 +182,22 @@ fun ResultsScreen(
         }
 
         Spacer(modifier = Modifier.height(16.dp))
+
+        if (activeRecommendation.isNotBlank()) {
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.tertiaryContainer)
+            ) {
+                Text(
+                    text = activeRecommendation,
+                    modifier = Modifier.padding(16.dp),
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    color = MaterialTheme.colorScheme.onTertiaryContainer,
+                )
+            }
+            Spacer(modifier = Modifier.height(16.dp))
+        }
 
         // ── DICOM Metadata ──
         Card(modifier = Modifier.fillMaxWidth()) {

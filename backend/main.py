@@ -108,6 +108,12 @@ class AnalysisResponse(BaseModel):
     arch_path: list[NervePoint]
     planning_overlay: PlanningOverlay
     bone_metrics: BoneMetrics
+    scan_region: str = "unknown"
+    ian_applicable: bool = False
+    ian_detected: bool = False
+    ian_status_message: str = ""
+    safe_zone_path: list[NervePoint] = []
+    recommendation_line: str = ""
     metadata: dict
 
 
@@ -120,6 +126,12 @@ class MeasureRequest(BaseModel):
 class MeasureResponse(BaseModel):
     bone_metrics: BoneMetrics
     planning_overlay: PlanningOverlay
+    scan_region: str = "unknown"
+    ian_applicable: bool = False
+    ian_detected: bool = False
+    ian_status_message: str = ""
+    safe_zone_path: list[NervePoint] = []
+    recommendation_line: str = ""
 
 
 class AuthRequest(BaseModel):
@@ -156,6 +168,56 @@ def _masks_match_volume(volume, bone_mask, nerve_mask) -> bool:
         and bone_mask.shape == volume.shape
         and nerve_mask.shape == volume.shape
     )
+
+
+def _classify_scan_region(arch_path: list[dict], image_rows: int) -> str:
+    if not arch_path:
+        return "unknown"
+    ys = [float(p.get("y", 0.0)) for p in arch_path]
+    if not ys:
+        return "unknown"
+    median_y = float(np.median(np.asarray(ys, dtype=np.float64)))
+    return "mandible" if median_y >= (float(image_rows) * 0.5) else "maxilla"
+
+
+def _is_ian_detected(scan_region: str, nerve_path: list[dict]) -> bool:
+    if scan_region != "mandible":
+        return False
+    return len(nerve_path) >= 8
+
+
+def _build_safe_zone_path(
+    nerve_path: list[dict],
+    pixel_spacing: list[float],
+    image_rows: int,
+    safety_margin_mm: float,
+) -> list[dict]:
+    if not nerve_path:
+        return []
+    row_spacing = float(pixel_spacing[0]) if pixel_spacing else 1.0
+    if not np.isfinite(row_spacing) or row_spacing <= 0:
+        row_spacing = 1.0
+    shift_px = max(1, int(round(safety_margin_mm / row_spacing)))
+    safe_path: list[dict] = []
+    for pt in nerve_path:
+        y = int(np.clip(int(pt.get("y", 0)) - shift_px, 0, image_rows - 1))
+        safe_path.append({"x": int(pt.get("x", 0)), "y": y})
+    return safe_path
+
+
+def _build_recommendation_line(scan_region: str, ian_detected: bool, safe_height_mm: float) -> str:
+    if scan_region == "mandible" and ian_detected:
+        return (
+            "Recommended implant placement region: above IAN with safe height "
+            f"of {safe_height_mm:.2f} mm."
+        )
+    return "IAN not applicable / not detected - manual clinical verification required."
+
+
+def _build_ian_status_message(scan_region: str, ian_detected: bool) -> str:
+    if scan_region == "mandible" and ian_detected:
+        return "IAN detected. Safe implant zone highlighted above the nerve."
+    return "IAN not applicable / not detected - manual clinical verification required."
 
 def detect_input_type(upload_bytes: bytes, filename: Optional[str]) -> Optional[str]:
     if filename and filename.lower().endswith(".zip"):
@@ -456,6 +518,26 @@ def _analyze_loaded_volume(
     else:
         arch_pts = planning_overlay["outer_contour"]
 
+    scan_region = _classify_scan_region(arch_pts, int(analysis_metadata.get("rows", volume.shape[-2])))
+    ian_detected = _is_ian_detected(scan_region, nerve_path)
+    ian_applicable = scan_region == "mandible"
+    ian_status_message = _build_ian_status_message(scan_region, ian_detected)
+    safe_zone_path = (
+        _build_safe_zone_path(
+            nerve_path=nerve_path,
+            pixel_spacing=list(analysis_metadata.get("pixel_spacing", [1.0, 1.0])),
+            image_rows=int(analysis_metadata.get("rows", volume.shape[-2])),
+            safety_margin_mm=float(bone_metrics.get("safety_margin_mm", 2.0)),
+        )
+        if ian_detected
+        else []
+    )
+    recommendation_line = _build_recommendation_line(
+        scan_region=scan_region,
+        ian_detected=ian_detected,
+        safe_height_mm=float(bone_metrics.get("safe_height_mm", 0.0)),
+    )
+
     session_id = str(uuid.uuid4())
     _volume_cache[session_id] = {
         "volume": analysis_volume,
@@ -463,6 +545,11 @@ def _analyze_loaded_volume(
         "nerve_mask": nerve_mask,
         "metadata": analysis_metadata,
         "workflow": workflow,
+        "scan_region": scan_region,
+        "ian_applicable": ian_applicable,
+        "ian_detected": ian_detected,
+        "ian_status_message": ian_status_message,
+        "safe_zone_path": safe_zone_path,
     }
     if len(_volume_cache) > 5:
         oldest = next(iter(_volume_cache))
@@ -494,6 +581,12 @@ def _analyze_loaded_volume(
             ],
         ),
         bone_metrics=BoneMetrics(**bone_metrics),
+        scan_region=scan_region,
+        ian_applicable=ian_applicable,
+        ian_detected=ian_detected,
+        ian_status_message=ian_status_message,
+        safe_zone_path=[NervePoint(**p) for p in safe_zone_path],
+        recommendation_line=recommendation_line,
         metadata={
             "pixel_spacing": analysis_metadata["pixel_spacing"],
             "slice_thickness": analysis_metadata["slice_thickness"],
@@ -587,6 +680,21 @@ async def measure(
     planning_overlay = build_planning_overlay(
         cached["volume"], cached["bone_mask"], bone_metrics
     )
+    scan_region = str(cached.get("scan_region", "unknown"))
+    ian_detected = bool(cached.get("ian_detected", False))
+    ian_applicable = bool(cached.get("ian_applicable", False))
+    ian_status_message = str(
+        cached.get(
+            "ian_status_message",
+            "IAN not applicable / not detected - manual clinical verification required.",
+        )
+    )
+    safe_zone_path = list(cached.get("safe_zone_path", []))
+    recommendation_line = _build_recommendation_line(
+        scan_region=scan_region,
+        ian_detected=ian_detected,
+        safe_height_mm=float(bone_metrics.get("safe_height_mm", 0.0)),
+    )
     return MeasureResponse(
         bone_metrics=BoneMetrics(**bone_metrics),
         planning_overlay=PlanningOverlay(
@@ -607,6 +715,12 @@ async def measure(
                 for sl in planning_overlay.get("sector_lines", [])
             ],
         ),
+        scan_region=scan_region,
+        ian_applicable=ian_applicable,
+        ian_detected=ian_detected,
+        ian_status_message=ian_status_message,
+        safe_zone_path=[NervePoint(**p) for p in safe_zone_path],
+        recommendation_line=recommendation_line,
     )
 
 

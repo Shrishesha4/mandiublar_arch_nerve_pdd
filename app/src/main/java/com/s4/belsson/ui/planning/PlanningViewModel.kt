@@ -9,6 +9,7 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.s4.belsson.data.model.AnalysisResponse
 import com.s4.belsson.data.model.BoneMetrics
+import com.s4.belsson.data.model.NervePathPoint
 import com.s4.belsson.data.model.PlanningOverlay
 import com.s4.belsson.data.repository.ImplantRepository
 import com.s4.belsson.data.repository.ImplantRepository.UploadWorkflow
@@ -68,6 +69,15 @@ class PlanningViewModel(application: Application) : AndroidViewModel(application
 
     private val _tapOverlay = MutableStateFlow<PlanningOverlay?>(null)
     val tapOverlay: StateFlow<PlanningOverlay?> = _tapOverlay.asStateFlow()
+
+    private val _tapSafeZonePath = MutableStateFlow<List<NervePathPoint>?>(null)
+    val tapSafeZonePath: StateFlow<List<NervePathPoint>?> = _tapSafeZonePath.asStateFlow()
+
+    private val _tapRecommendationLine = MutableStateFlow<String?>(null)
+    val tapRecommendationLine: StateFlow<String?> = _tapRecommendationLine.asStateFlow()
+
+    private val _tapIanStatusMessage = MutableStateFlow<String?>(null)
+    val tapIanStatusMessage: StateFlow<String?> = _tapIanStatusMessage.asStateFlow()
 
     /** Session ID from the last successful analysis */
     private var currentSessionId: String? = null
@@ -137,6 +147,11 @@ class PlanningViewModel(application: Application) : AndroidViewModel(application
         _uiState.value = PlanningUiState.Loading
         _tapMetrics.value = null
         _tapOverlay.value = null
+        _tapSafeZonePath.value = null
+        _tapRecommendationLine.value = null
+        _tapIanStatusMessage.value = null
+
+        val panoramicIsNonDicom = isNonDicomPanoramic(panoramicUri)
 
         viewModelScope.launch {
             try {
@@ -166,10 +181,16 @@ class PlanningViewModel(application: Application) : AndroidViewModel(application
                         PlanningUiState.Error("CBCT analysis returned no data")
                     return@launch
                 }
-                val panoramicResponse = panoramicResult.getOrNull() ?: run {
+                val panoramicResponseRaw = panoramicResult.getOrNull() ?: run {
                     _uiState.value =
                         PlanningUiState.Error("Panoramic analysis returned no data")
                     return@launch
+                }
+
+                val panoramicResponse = if (panoramicIsNonDicom) {
+                    panoramicResponseRaw.copy(patientName = cbctResponse.patientName)
+                } else {
+                    panoramicResponseRaw
                 }
 
                 currentSessionId = panoramicResponse.sessionId
@@ -231,6 +252,9 @@ class PlanningViewModel(application: Application) : AndroidViewModel(application
                     onSuccess = { response ->
                         _tapMetrics.value = response.boneMetrics
                         _tapOverlay.value = response.planningOverlay
+                        _tapSafeZonePath.value = response.safeZonePath
+                        _tapRecommendationLine.value = response.recommendationLine
+                        _tapIanStatusMessage.value = response.ianStatusMessage
                     },
                     onFailure = { /* silently ignore for now */ }
                 )
@@ -256,7 +280,10 @@ class PlanningViewModel(application: Application) : AndroidViewModel(application
             analysis = preferred,
             opgBitmap = preferredBitmap,
             toothLabel = toothLabel,
-            tapMetrics = _tapMetrics.value
+            tapMetrics = _tapMetrics.value,
+            tapRecommendationLine = _tapRecommendationLine.value,
+            tapIanStatusMessage = _tapIanStatusMessage.value,
+            tapSafeZonePath = _tapSafeZonePath.value ?: emptyList()
         )
     }
 
@@ -268,6 +295,9 @@ class PlanningViewModel(application: Application) : AndroidViewModel(application
         _uiState.value = PlanningUiState.Idle
         _tapMetrics.value = null
         _tapOverlay.value = null
+        _tapSafeZonePath.value = null
+        _tapRecommendationLine.value = null
+        _tapIanStatusMessage.value = null
         currentSessionId = null
     }
 
@@ -288,5 +318,16 @@ class PlanningViewModel(application: Application) : AndroidViewModel(application
     private fun sanitizeSpacing(value: Double): Double {
         if (!value.isFinite()) return 1.0
         return abs(value).coerceAtLeast(0.01)
+    }
+
+    private fun isNonDicomPanoramic(uri: Uri): Boolean {
+        val resolver = getApplication<Application>().contentResolver
+        val mime = resolver.getType(uri)?.lowercase().orEmpty()
+        if (mime.startsWith("image/")) return true
+        if (mime.contains("dicom") || mime == "application/dicom") return false
+
+        val path = uri.toString().lowercase()
+        if (path.endsWith(".dcm") || path.endsWith(".dicom")) return false
+        return path.endsWith(".jpg") || path.endsWith(".jpeg") || path.endsWith(".png")
     }
 }

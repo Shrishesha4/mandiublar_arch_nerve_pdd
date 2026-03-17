@@ -5,6 +5,7 @@ import android.graphics.*
 import android.graphics.pdf.PdfDocument
 import com.s4.belsson.data.model.AnalysisResponse
 import com.s4.belsson.data.model.BoneMetrics
+import com.s4.belsson.data.model.NervePathPoint
 import java.io.File
 import java.io.FileOutputStream
 import java.text.SimpleDateFormat
@@ -71,7 +72,10 @@ class ReportGenerator(private val context: Context) {
         analysis: AnalysisResponse,
         opgBitmap: Bitmap?,
         toothLabel: String = "Tooth 36",
-        tapMetrics: BoneMetrics? = null
+        tapMetrics: BoneMetrics? = null,
+        tapRecommendationLine: String? = null,
+        tapIanStatusMessage: String? = null,
+        tapSafeZonePath: List<NervePathPoint> = emptyList(),
     ): File {
         document = PdfDocument()
         newPage()
@@ -90,15 +94,21 @@ class ReportGenerator(private val context: Context) {
         sectionHeader("Patient Information")
         val cleanName = cleanDicomName(analysis.patientName)
         val dateStr = SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.getDefault()).format(Date())
+        val regionLabel = analysis.scanRegion.replaceFirstChar { if (it.isLowerCase()) it.titlecase() else it.toString() }
+        val activeIanStatus = tapIanStatusMessage?.takeIf { it.isNotBlank() } ?: analysis.ianStatusMessage
+        val activeRecommendation = tapRecommendationLine?.takeIf { it.isNotBlank() } ?: analysis.recommendationLine
         infoRow("Patient Name", cleanName)
         infoRow("Report Date", dateStr)
-        infoRow("Region", toothLabel)
+        infoRow("Scan Region", regionLabel)
+        infoRow("Planned Site", toothLabel)
         infoRow("Session ID", analysis.sessionId)
+        infoRow("IAN Status", activeIanStatus.ifBlank { "N/A" })
         y += 12f
 
         // ── OPG Image with overlays ────────────────────────────────────────────
         if (opgBitmap != null) {
-            val annotated = drawOverlaysOnBitmap(opgBitmap, analysis)
+            val activeSafeZone = if (tapSafeZonePath.isNotEmpty()) tapSafeZonePath else analysis.safeZonePath
+            val annotated = drawOverlaysOnBitmap(opgBitmap, analysis, activeSafeZone)
 
             // Calculate the scaled dimensions preserving full aspect ratio
             val scaledWidth = CONTENT_WIDTH
@@ -296,6 +306,13 @@ class ReportGenerator(private val context: Context) {
         }
         y += 12f
 
+        if (activeRecommendation.isNotBlank()) {
+            ensureSpace(38f)
+            sectionHeader("Implant Recommendation")
+            draw { c -> c.drawText(activeRecommendation, MARGIN + 10f, y, bodyPaint) }
+            y += 20f
+        }
+
         // ── Nerve Path ────────────────────────────────────────────────────────
         ensureSpace(60f)
         sectionHeader("Inferior Alveolar Nerve")
@@ -344,7 +361,11 @@ class ReportGenerator(private val context: Context) {
      *  - Nerve markers     → orange dots (always shown with overlay)
      *  - Width indicator   → triple blue lines (implant simulation)
      */
-    private fun drawOverlaysOnBitmap(src: Bitmap, analysis: AnalysisResponse): Bitmap {
+    private fun drawOverlaysOnBitmap(
+        src: Bitmap,
+        analysis: AnalysisResponse,
+        safeZonePath: List<NervePathPoint>,
+    ): Bitmap {
         val bmp = src.copy(Bitmap.Config.ARGB_8888, true)
         val c = Canvas(bmp)
         val w = bmp.width.toFloat()
@@ -353,6 +374,10 @@ class ReportGenerator(private val context: Context) {
         val density = (w / 400f).coerceAtLeast(1f)
 
         val overlay = analysis.planningOverlay
+
+        if (analysis.nervePath.isNotEmpty() && safeZonePath.isNotEmpty()) {
+            drawSafeZoneBand(c, analysis.nervePath, safeZonePath)
+        }
 
         // ── Outer contour  (red, strokeWidth ≈ 2.4 dp) ───────────────────────
         drawSmoothPolyline(c, overlay.outerContour, Color.RED, strokeWidth = 2.4f * density)
@@ -368,12 +393,38 @@ class ReportGenerator(private val context: Context) {
             drawWidthIndicator(c, wi, density)
         }
 
-        // ── Nerve markers — only when no planning contour is present ──────────
-        if (overlay.outerContour.isEmpty() && analysis.nervePath.isNotEmpty()) {
+        // ── IAN traced path + markers ──────────────────────────────────────────
+        if (analysis.nervePath.isNotEmpty()) {
+            drawSmoothPolyline(c, analysis.nervePath, Color.rgb(255, 152, 0), strokeWidth = 2.2f * density)
             drawNerveMarkers(c, analysis.nervePath, density)
         }
 
         return bmp
+    }
+
+    private fun drawSafeZoneBand(
+        c: Canvas,
+        nervePath: List<com.s4.belsson.data.model.NervePathPoint>,
+        safeZonePath: List<com.s4.belsson.data.model.NervePathPoint>,
+    ) {
+        val count = minOf(nervePath.size, safeZonePath.size)
+        if (count < 2) return
+        val path = Path().apply {
+            moveTo(safeZonePath[0].x.toFloat(), safeZonePath[0].y.toFloat())
+            for (i in 1 until count) {
+                lineTo(safeZonePath[i].x.toFloat(), safeZonePath[i].y.toFloat())
+            }
+            for (i in (count - 1) downTo 0) {
+                lineTo(nervePath[i].x.toFloat(), nervePath[i].y.toFloat())
+            }
+            close()
+        }
+        val paint = Paint().apply {
+            color = Color.argb(50, 255, 152, 0)
+            style = Paint.Style.FILL
+            isAntiAlias = true
+        }
+        c.drawPath(path, paint)
     }
 
     /** Smooth quadratic-bezier polyline (mirrors JawCanvasView smooth path). */

@@ -16,6 +16,12 @@ data class AnalysisResponse(
     @SerialName("arch_path") val archPath: List<NervePathPoint> = emptyList(),
     @SerialName("planning_overlay") val planningOverlay: PlanningOverlay = PlanningOverlay(),
     @SerialName("bone_metrics") val boneMetrics: BoneMetrics = BoneMetrics(),
+    @SerialName("scan_region") val scanRegion: String = "unknown",
+    @SerialName("ian_applicable") val ianApplicable: Boolean = false,
+    @SerialName("ian_detected") val ianDetected: Boolean = false,
+    @SerialName("ian_status_message") val ianStatusMessage: String = "",
+    @SerialName("safe_zone_path") val safeZonePath: List<NervePathPoint> = emptyList(),
+    @SerialName("recommendation_line") val recommendationLine: String = "",
     val metadata: DicomMetadata = DicomMetadata()
 )
 
@@ -76,7 +82,13 @@ data class DicomMetadata(
 @Serializable
 data class MeasureResponse(
     @SerialName("bone_metrics") val boneMetrics: BoneMetrics = BoneMetrics(),
-    @SerialName("planning_overlay") val planningOverlay: PlanningOverlay = PlanningOverlay()
+    @SerialName("planning_overlay") val planningOverlay: PlanningOverlay = PlanningOverlay(),
+    @SerialName("scan_region") val scanRegion: String = "unknown",
+    @SerialName("ian_applicable") val ianApplicable: Boolean = false,
+    @SerialName("ian_detected") val ianDetected: Boolean = false,
+    @SerialName("ian_status_message") val ianStatusMessage: String = "",
+    @SerialName("safe_zone_path") val safeZonePath: List<NervePathPoint> = emptyList(),
+    @SerialName("recommendation_line") val recommendationLine: String = ""
 )
 
 /**
