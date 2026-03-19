@@ -568,6 +568,11 @@ def _analyze_loaded_volume(
         ian_detected=ian_detected,
         safe_height_mm=float(bone_metrics.get("safe_height_mm", 0.0)),
     )
+    if workflow == "panoramic_mandibular_canal":
+        recommendation_line = (
+            "Panoramic measurements are orientation-only. Final implant decision requires "
+            "verified CBCT cross-sections and nerve relation."
+        )
 
     session_id = str(uuid.uuid4())
     _volume_cache[session_id] = {
@@ -628,6 +633,9 @@ def _analyze_loaded_volume(
             "dataset_type": dataset_type,
             "modality": analysis_metadata.get("modality", "UNKNOWN"),
             "is_calibrated_hu": bool(analysis_metadata.get("is_calibrated_hu", False)),
+            "rescale_slope": float(analysis_metadata.get("rescale_slope", 1.0)),
+            "rescale_intercept": float(analysis_metadata.get("rescale_intercept", 0.0)),
+            "has_rescale": bool(analysis_metadata.get("has_rescale", False)),
         },
     )
 
@@ -726,6 +734,11 @@ async def measure(
         ian_detected=ian_detected,
         safe_height_mm=float(bone_metrics.get("safe_height_mm", 0.0)),
     )
+    if str(cached.get("workflow", "")) == "panoramic_mandibular_canal":
+        recommendation_line = (
+            "Panoramic measurements are orientation-only. Final implant decision requires "
+            "verified CBCT cross-sections and nerve relation."
+        )
     return MeasureResponse(
         bone_metrics=BoneMetrics(**bone_metrics),
         planning_overlay=PlanningOverlay(

@@ -74,6 +74,9 @@ data class DicomMetadata(
     @SerialName("dataset_type") val datasetType: String = "unknown",
     val modality: String = "UNKNOWN",
     @SerialName("is_calibrated_hu") val isCalibratedHu: Boolean = false,
+    @SerialName("rescale_slope") val rescaleSlope: Double = 1.0,
+    @SerialName("rescale_intercept") val rescaleIntercept: Double = 0.0,
+    @SerialName("has_rescale") val hasRescale: Boolean = false,
 )
 
 /**

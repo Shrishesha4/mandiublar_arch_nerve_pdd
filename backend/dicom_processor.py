@@ -94,6 +94,9 @@ def load_dicom_volume(dicom_bytes: bytes) -> tuple[np.ndarray, dict]:
         "num_slices": volume.shape[0],
         "modality": modality or "UNKNOWN",
         "is_calibrated_hu": is_calibrated_hu,
+        "rescale_slope": slope,
+        "rescale_intercept": intercept,
+        "has_rescale": hasattr(ds, "RescaleSlope") or hasattr(ds, "RescaleIntercept"),
     }
 
     Path(tmp_path).unlink(missing_ok=True)
@@ -241,6 +244,9 @@ def _load_cbct_series_from_dir(root: Path) -> tuple[np.ndarray, dict]:
                 "num_slices": int(volume.shape[0]),
                 "modality": modality,
                 "is_calibrated_hu": modality == "CT",
+                "rescale_slope": float(getattr(ds, "RescaleSlope", 1.0)),
+                "rescale_intercept": float(getattr(ds, "RescaleIntercept", 0.0)),
+                "has_rescale": hasattr(ds, "RescaleSlope") or hasattr(ds, "RescaleIntercept"),
             }
             return volume, metadata
 
@@ -355,6 +361,9 @@ def _load_cbct_series_from_dir(root: Path) -> tuple[np.ndarray, dict]:
         "num_slices": int(volume.shape[0]),
         "modality": modality,
         "is_calibrated_hu": modality == "CT",
+        "rescale_slope": float(getattr(first_ds, "RescaleSlope", 1.0)),
+        "rescale_intercept": float(getattr(first_ds, "RescaleIntercept", 0.0)),
+        "has_rescale": hasattr(first_ds, "RescaleSlope") or hasattr(first_ds, "RescaleIntercept"),
     }
     return volume, metadata
 
@@ -418,6 +427,9 @@ def load_image_projection(image_bytes: bytes) -> tuple[np.ndarray, dict]:
         "num_slices": 1,
         "modality": "OT",
         "is_calibrated_hu": False,
+        "rescale_slope": 1.0,
+        "rescale_intercept": 0.0,
+        "has_rescale": False,
     }
     return volume, metadata
 
@@ -1391,8 +1403,18 @@ def calculate_bone_metrics(
             row_min, row_max = int(H * 0.35), int(H * 0.75)
             col_min, col_max = int(W * 0.25), int(W * 0.75)
 
-        center_row = int(np.clip((row_min + row_max) // 2, 0, H - 1))
-        center_col = int(np.clip((col_min + col_max) // 2, 0, W - 1))
+        # Use the requested/tapped coordinate as the planning center for CBCT.
+        center_row = int(np.clip(cy, row_min, row_max))
+        center_col = int(np.clip(cx, col_min, col_max))
+
+        # If tapped point is not on bone, snap to nearest local bone pixel.
+        if not bool(axial_bone[center_row, center_col]):
+            rr, cc = np.where(axial_bone)
+            if len(rr) > 0:
+                d2 = (rr - center_row) ** 2 + (cc - center_col) ** 2
+                nearest_idx = int(np.argmin(d2))
+                center_row = int(rr[nearest_idx])
+                center_col = int(cc[nearest_idx])
 
         row_segment = axial_bone[center_row, col_min:col_max + 1]
         seg_cols = np.where(row_segment)[0]
@@ -1408,12 +1430,12 @@ def calculate_bone_metrics(
         else:
             height_px = float(max(1, row_max - row_min))
 
-        width_mm = float(width_px * float(pixel_spacing[1]))
-        height_mm = float(height_px * float(pixel_spacing[0]))
+        width_mm_raw = float(width_px * float(pixel_spacing[1]))
+        height_mm_raw = float(height_px * float(pixel_spacing[0]))
 
-        # Keep CBCT outputs within plausible planning ranges for stable UI rendering.
-        width_mm = float(np.clip(width_mm, 3.0, 15.0))
-        height_mm = float(np.clip(height_mm, 10.0, 35.0))
+        # Keep CBCT outputs within plausible preview ranges and track clipping.
+        width_mm = float(np.clip(width_mm_raw, 3.0, 15.0))
+        height_mm = float(np.clip(height_mm_raw, 10.0, 35.0))
         safe_height_mm = float(max(0.0, height_mm - SAFETY_MARGIN_MM))
 
         is_calibrated_hu = bool(metadata.get("is_calibrated_hu", False))
@@ -1434,6 +1456,44 @@ def calculate_bone_metrics(
         if not np.isfinite(safe_height_mm):
             safe_height_mm = 8.0
 
+        # ROI sanity: implant-site window should be bone-centered (not canal/air dominated).
+        roi = axial_vol[max(0, center_row - 10): center_row + 11, max(0, center_col - 10): center_col + 11]
+        roi_bone = axial_bone[max(0, center_row - 10): center_row + 11, max(0, center_col - 10): center_col + 11]
+        bone_fraction = float(np.mean(roi_bone)) if roi_bone.size > 0 else 0.0
+        is_calibrated_hu = bool(metadata.get("is_calibrated_hu", False))
+        if is_calibrated_hu:
+            air_fraction = float(np.mean(roi < -300.0)) if roi.size > 0 else 0.0
+        else:
+            low_cut = float(np.percentile(axial_vol, 8))
+            air_fraction = float(np.mean(roi < low_cut)) if roi.size > 0 else 0.0
+
+        safety_status, safety_reason = _classify_measurement(width_mm, safe_height_mm)
+        safety_status, safety_reason = _apply_clinical_guardrails(
+            width_mm=width_mm,
+            height_mm=height_mm,
+            safe_height_mm=safe_height_mm,
+            density_hu=density_estimate,
+            has_nerve=bool(axial_nerve.any()),
+            dataset_type="volumetric_cbct",
+            is_hu_calibrated=is_calibrated_hu,
+            initial_status=safety_status,
+            initial_reason=safety_reason,
+        )[3:]
+
+        extra_notes: list[str] = []
+        width_hit_cap = width_mm >= 14.99 and width_mm_raw > 15.0
+        if width_hit_cap:
+            extra_notes.append(
+                f"Width hit 15.0 mm cap (raw {width_mm_raw:.2f} mm from {width_px:.1f} px at spacing {float(pixel_spacing[1]):.4f} mm/px)."
+            )
+        if bone_fraction < 0.22 or air_fraction > 0.55:
+            safety_status = "review"
+            extra_notes.append(
+                "ROI may not be centered in cortical/trabecular bone (possible canal/air overlap). Re-measure on CBCT cross-section at planned implant site."
+            )
+        if extra_notes:
+            safety_reason = (safety_reason + " " + " ".join(extra_notes)).strip()
+
         return {
             "width_mm": round(float(width_mm), 2),
             "height_mm": round(float(height_mm), 2),
@@ -1441,8 +1501,8 @@ def calculate_bone_metrics(
             "safety_margin_mm": SAFETY_MARGIN_MM,
             "density_estimate_hu": round(float(density_estimate), 1),
             "measurement_location": {"x": int(center_col), "y": int(center_row)},
-            "safety_status": "review",
-            "safety_reason": "CBCT preview measurement uses localized fallback geometry.",
+            "safety_status": safety_status,
+            "safety_reason": safety_reason,
         }
 
     # Legacy panoramic/2D path remains unchanged.

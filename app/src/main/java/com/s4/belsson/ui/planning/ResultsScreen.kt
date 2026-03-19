@@ -210,6 +210,8 @@ fun ResultsScreen(
                 Text("Slice Thickness: ${meta.sliceThickness} mm")
                 Text("Dataset Type: ${meta.datasetType}")
                 Text("HU Calibrated: ${if (meta.isCalibratedHu) "Yes" else "No"}")
+                Text("Rescale Present: ${if (meta.hasRescale) "Yes" else "No"}")
+                Text("Rescale Slope/Intercept: ${meta.rescaleSlope} / ${meta.rescaleIntercept}")
             }
         }
 
