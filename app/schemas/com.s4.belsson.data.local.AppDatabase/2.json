@@ -1,0 +1,879 @@
+{
+  "formatVersion": 1,
+  "database": {
+    "version": 2,
+    "identityHash": "25c64af1da555917b34deb0913e57f5e",
+    "entities": [
+      {
+        "tableName": "patients",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `remote_patient_id` TEXT, `first_name` TEXT NOT NULL, `last_name` TEXT NOT NULL, `dob` TEXT, `gender` TEXT, `phone` TEXT, `email` TEXT, `created_at` INTEGER NOT NULL, `updated_at` INTEGER NOT NULL)",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "remotePatientId",
+            "columnName": "remote_patient_id",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "firstName",
+            "columnName": "first_name",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "lastName",
+            "columnName": "last_name",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "dob",
+            "columnName": "dob",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "gender",
+            "columnName": "gender",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "phone",
+            "columnName": "phone",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "email",
+            "columnName": "email",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "createdAt",
+            "columnName": "created_at",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "updatedAt",
+            "columnName": "updated_at",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": true,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_patients_remote_patient_id",
+            "unique": true,
+            "columnNames": [
+              "remote_patient_id"
+            ],
+            "orders": [],
+            "createSql": "CREATE UNIQUE INDEX IF NOT EXISTS `index_patients_remote_patient_id` ON `${TABLE_NAME}` (`remote_patient_id`)"
+          },
+          {
+            "name": "index_patients_last_name_first_name",
+            "unique": false,
+            "columnNames": [
+              "last_name",
+              "first_name"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_patients_last_name_first_name` ON `${TABLE_NAME}` (`last_name`, `first_name`)"
+          },
+          {
+            "name": "index_patients_updated_at",
+            "unique": false,
+            "columnNames": [
+              "updated_at"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_patients_updated_at` ON `${TABLE_NAME}` (`updated_at`)"
+          }
+        ]
+      },
+      {
+        "tableName": "medical_reports",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `patient_id` INTEGER NOT NULL, `session_id` TEXT NOT NULL, `scan_region` TEXT NOT NULL, `workflow` TEXT NOT NULL, `safe_height_mm` REAL NOT NULL, `bone_width_mm` REAL NOT NULL, `bone_height_mm` REAL NOT NULL, `nerve_detected` INTEGER NOT NULL, `recommendation` TEXT NOT NULL, `pdf_path` TEXT NOT NULL, `created_at` INTEGER NOT NULL, FOREIGN KEY(`patient_id`) REFERENCES `patients`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE )",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "patientId",
+            "columnName": "patient_id",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "sessionId",
+            "columnName": "session_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "scanRegion",
+            "columnName": "scan_region",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "workflow",
+            "columnName": "workflow",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "safeHeightMm",
+            "columnName": "safe_height_mm",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "boneWidthMm",
+            "columnName": "bone_width_mm",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "boneHeightMm",
+            "columnName": "bone_height_mm",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "nerveDetected",
+            "columnName": "nerve_detected",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "recommendation",
+            "columnName": "recommendation",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "pdfPath",
+            "columnName": "pdf_path",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "createdAt",
+            "columnName": "created_at",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": true,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_medical_reports_patient_id",
+            "unique": false,
+            "columnNames": [
+              "patient_id"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_medical_reports_patient_id` ON `${TABLE_NAME}` (`patient_id`)"
+          },
+          {
+            "name": "index_medical_reports_session_id",
+            "unique": true,
+            "columnNames": [
+              "session_id"
+            ],
+            "orders": [],
+            "createSql": "CREATE UNIQUE INDEX IF NOT EXISTS `index_medical_reports_session_id` ON `${TABLE_NAME}` (`session_id`)"
+          },
+          {
+            "name": "index_medical_reports_created_at",
+            "unique": false,
+            "columnNames": [
+              "created_at"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_medical_reports_created_at` ON `${TABLE_NAME}` (`created_at`)"
+          }
+        ],
+        "foreignKeys": [
+          {
+            "table": "patients",
+            "onDelete": "CASCADE",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "patient_id"
+            ],
+            "referencedColumns": [
+              "id"
+            ]
+          }
+        ]
+      },
+      {
+        "tableName": "users",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` INTEGER NOT NULL, `name` TEXT NOT NULL, `email` TEXT NOT NULL, `phone` TEXT, `practice_name` TEXT, `bio` TEXT, `specialty` TEXT, `updated_at` INTEGER NOT NULL, PRIMARY KEY(`id`))",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "name",
+            "columnName": "name",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "email",
+            "columnName": "email",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "phone",
+            "columnName": "phone",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "practiceName",
+            "columnName": "practice_name",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "bio",
+            "columnName": "bio",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "specialty",
+            "columnName": "specialty",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "updatedAt",
+            "columnName": "updated_at",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_users_email",
+            "unique": true,
+            "columnNames": [
+              "email"
+            ],
+            "orders": [],
+            "createSql": "CREATE UNIQUE INDEX IF NOT EXISTS `index_users_email` ON `${TABLE_NAME}` (`email`)"
+          }
+        ]
+      },
+      {
+        "tableName": "user_settings",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`user_id` INTEGER NOT NULL, `theme` TEXT NOT NULL, `language` TEXT NOT NULL, `notifications_json` TEXT NOT NULL, `updated_at` INTEGER NOT NULL, PRIMARY KEY(`user_id`), FOREIGN KEY(`user_id`) REFERENCES `users`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE )",
+        "fields": [
+          {
+            "fieldPath": "userId",
+            "columnName": "user_id",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "theme",
+            "columnName": "theme",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "language",
+            "columnName": "language",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "notificationsJson",
+            "columnName": "notifications_json",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "updatedAt",
+            "columnName": "updated_at",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "user_id"
+          ]
+        },
+        "foreignKeys": [
+          {
+            "table": "users",
+            "onDelete": "CASCADE",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "user_id"
+            ],
+            "referencedColumns": [
+              "id"
+            ]
+          }
+        ]
+      },
+      {
+        "tableName": "cases",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `user_id` INTEGER NOT NULL, `remote_id` INTEGER NOT NULL, `case_id` TEXT NOT NULL, `fname` TEXT NOT NULL, `lname` TEXT NOT NULL, `patient_age` INTEGER, `tooth_number` TEXT, `complaint` TEXT, `case_type` TEXT, `status` TEXT NOT NULL, `created_at` TEXT NOT NULL, `updated_at` INTEGER NOT NULL, FOREIGN KEY(`user_id`) REFERENCES `users`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE )",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "userId",
+            "columnName": "user_id",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "remoteId",
+            "columnName": "remote_id",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "caseId",
+            "columnName": "case_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "fname",
+            "columnName": "fname",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "lname",
+            "columnName": "lname",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "patientAge",
+            "columnName": "patient_age",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "toothNumber",
+            "columnName": "tooth_number",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "complaint",
+            "columnName": "complaint",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "caseType",
+            "columnName": "case_type",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "status",
+            "columnName": "status",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "createdAt",
+            "columnName": "created_at",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "updatedAt",
+            "columnName": "updated_at",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": true,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_cases_user_id",
+            "unique": false,
+            "columnNames": [
+              "user_id"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_cases_user_id` ON `${TABLE_NAME}` (`user_id`)"
+          },
+          {
+            "name": "index_cases_case_id",
+            "unique": true,
+            "columnNames": [
+              "case_id"
+            ],
+            "orders": [],
+            "createSql": "CREATE UNIQUE INDEX IF NOT EXISTS `index_cases_case_id` ON `${TABLE_NAME}` (`case_id`)"
+          },
+          {
+            "name": "index_cases_created_at",
+            "unique": false,
+            "columnNames": [
+              "created_at"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_cases_created_at` ON `${TABLE_NAME}` (`created_at`)"
+          }
+        ],
+        "foreignKeys": [
+          {
+            "table": "users",
+            "onDelete": "CASCADE",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "user_id"
+            ],
+            "referencedColumns": [
+              "id"
+            ]
+          }
+        ]
+      },
+      {
+        "tableName": "case_files",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `case_local_id` INTEGER NOT NULL, `filename` TEXT NOT NULL, `file_path` TEXT NOT NULL, `uploaded_at` TEXT NOT NULL, FOREIGN KEY(`case_local_id`) REFERENCES `cases`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE )",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "caseLocalId",
+            "columnName": "case_local_id",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "filename",
+            "columnName": "filename",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "filePath",
+            "columnName": "file_path",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "uploadedAt",
+            "columnName": "uploaded_at",
+            "affinity": "TEXT",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": true,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_case_files_case_local_id",
+            "unique": false,
+            "columnNames": [
+              "case_local_id"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_case_files_case_local_id` ON `${TABLE_NAME}` (`case_local_id`)"
+          }
+        ],
+        "foreignKeys": [
+          {
+            "table": "cases",
+            "onDelete": "CASCADE",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "case_local_id"
+            ],
+            "referencedColumns": [
+              "id"
+            ]
+          }
+        ]
+      },
+      {
+        "tableName": "billing",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`user_id` INTEGER NOT NULL, `plan_name` TEXT NOT NULL, `status` TEXT NOT NULL, `next_billing_date` TEXT, `card_last4` TEXT, `billing_history_json` TEXT NOT NULL, `updated_at` INTEGER NOT NULL, PRIMARY KEY(`user_id`), FOREIGN KEY(`user_id`) REFERENCES `users`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE )",
+        "fields": [
+          {
+            "fieldPath": "userId",
+            "columnName": "user_id",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "planName",
+            "columnName": "plan_name",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "status",
+            "columnName": "status",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "nextBillingDate",
+            "columnName": "next_billing_date",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "cardLast4",
+            "columnName": "card_last4",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "billingHistoryJson",
+            "columnName": "billing_history_json",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "updatedAt",
+            "columnName": "updated_at",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "user_id"
+          ]
+        },
+        "foreignKeys": [
+          {
+            "table": "users",
+            "onDelete": "CASCADE",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "user_id"
+            ],
+            "referencedColumns": [
+              "id"
+            ]
+          }
+        ]
+      },
+      {
+        "tableName": "team_members",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `remote_id` INTEGER NOT NULL, `owner_id` INTEGER NOT NULL, `name` TEXT NOT NULL, `email` TEXT NOT NULL, `role` TEXT NOT NULL, `updated_at` INTEGER NOT NULL, FOREIGN KEY(`owner_id`) REFERENCES `users`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE )",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "remoteId",
+            "columnName": "remote_id",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "ownerId",
+            "columnName": "owner_id",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "name",
+            "columnName": "name",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "email",
+            "columnName": "email",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "role",
+            "columnName": "role",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "updatedAt",
+            "columnName": "updated_at",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": true,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_team_members_owner_id",
+            "unique": false,
+            "columnNames": [
+              "owner_id"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_team_members_owner_id` ON `${TABLE_NAME}` (`owner_id`)"
+          },
+          {
+            "name": "index_team_members_remote_id",
+            "unique": true,
+            "columnNames": [
+              "remote_id"
+            ],
+            "orders": [],
+            "createSql": "CREATE UNIQUE INDEX IF NOT EXISTS `index_team_members_remote_id` ON `${TABLE_NAME}` (`remote_id`)"
+          }
+        ],
+        "foreignKeys": [
+          {
+            "table": "users",
+            "onDelete": "CASCADE",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "owner_id"
+            ],
+            "referencedColumns": [
+              "id"
+            ]
+          }
+        ]
+      },
+      {
+        "tableName": "case_analysis",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `case_local_id` INTEGER NOT NULL, `arch_curve_json` TEXT NOT NULL, `nerve_path_json` TEXT NOT NULL, `bone_width_36` TEXT NOT NULL, `bone_height` TEXT NOT NULL, `nerve_distance` TEXT NOT NULL, `safe_implant_length` TEXT NOT NULL, `clinical_report` TEXT, `patient_explanation` TEXT, `created_at` TEXT NOT NULL, FOREIGN KEY(`case_local_id`) REFERENCES `cases`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE )",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "caseLocalId",
+            "columnName": "case_local_id",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "archCurveJson",
+            "columnName": "arch_curve_json",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "nervePathJson",
+            "columnName": "nerve_path_json",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "boneWidth36",
+            "columnName": "bone_width_36",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "boneHeight",
+            "columnName": "bone_height",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "nerveDistance",
+            "columnName": "nerve_distance",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "safeImplantLength",
+            "columnName": "safe_implant_length",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "clinicalReport",
+            "columnName": "clinical_report",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "patientExplanation",
+            "columnName": "patient_explanation",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "createdAt",
+            "columnName": "created_at",
+            "affinity": "TEXT",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": true,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_case_analysis_case_local_id",
+            "unique": true,
+            "columnNames": [
+              "case_local_id"
+            ],
+            "orders": [],
+            "createSql": "CREATE UNIQUE INDEX IF NOT EXISTS `index_case_analysis_case_local_id` ON `${TABLE_NAME}` (`case_local_id`)"
+          }
+        ],
+        "foreignKeys": [
+          {
+            "table": "cases",
+            "onDelete": "CASCADE",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "case_local_id"
+            ],
+            "referencedColumns": [
+              "id"
+            ]
+          }
+        ]
+      },
+      {
+        "tableName": "chat_messages",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `user_id` INTEGER NOT NULL, `role` TEXT NOT NULL, `message` TEXT NOT NULL, `sent_at` INTEGER NOT NULL, FOREIGN KEY(`user_id`) REFERENCES `users`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE )",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "userId",
+            "columnName": "user_id",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "role",
+            "columnName": "role",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "message",
+            "columnName": "message",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "sentAt",
+            "columnName": "sent_at",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": true,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_chat_messages_user_id",
+            "unique": false,
+            "columnNames": [
+              "user_id"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_chat_messages_user_id` ON `${TABLE_NAME}` (`user_id`)"
+          },
+          {
+            "name": "index_chat_messages_sent_at",
+            "unique": false,
+            "columnNames": [
+              "sent_at"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_chat_messages_sent_at` ON `${TABLE_NAME}` (`sent_at`)"
+          }
+        ],
+        "foreignKeys": [
+          {
+            "table": "users",
+            "onDelete": "CASCADE",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "user_id"
+            ],
+            "referencedColumns": [
+              "id"
+            ]
+          }
+        ]
+      }
+    ],
+    "setupQueries": [
+      "CREATE TABLE IF NOT EXISTS room_master_table (id INTEGER PRIMARY KEY,identity_hash TEXT)",
+      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, '25c64af1da555917b34deb0913e57f5e')"
+    ]
+  }
+}

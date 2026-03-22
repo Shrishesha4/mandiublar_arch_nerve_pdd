@@ -7,19 +7,30 @@ import android.net.Uri
 import android.util.Base64
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.s4.belsson.data.local.entity.BillingEntity
+import com.s4.belsson.data.local.entity.CaseEntity
+import com.s4.belsson.data.local.entity.ChatMessageEntity
+import com.s4.belsson.data.local.entity.TeamMemberEntity
+import com.s4.belsson.data.local.entity.UserEntity
+import com.s4.belsson.data.local.entity.UserSettingsEntity
 import com.s4.belsson.data.model.AnalysisResponse
 import com.s4.belsson.data.model.BoneMetrics
+import com.s4.belsson.data.model.CaseCreateRequest
 import com.s4.belsson.data.model.NervePathPoint
 import com.s4.belsson.data.model.PlanningOverlay
+import com.s4.belsson.data.repository.DomainSyncOrchestrator
 import com.s4.belsson.data.repository.ImplantRepository
 import com.s4.belsson.data.repository.ImplantRepository.UploadWorkflow
 import com.s4.belsson.data.repository.LocalMedicalRepository
+import com.s4.belsson.data.repository.UnifiedDomainRepository
 import com.s4.belsson.util.MeasurementManager
 import com.s4.belsson.util.ReportGenerator
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import java.io.File
@@ -45,9 +56,20 @@ sealed class PlanningUiState {
 sealed class AuthUiState {
     data object Loading : AuthUiState()
     data object Unauthenticated : AuthUiState()
-    data class Authenticated(val email: String) : AuthUiState()
+    data class Authenticated(val email: String, val userId: Int) : AuthUiState()
     data class Error(val message: String) : AuthUiState()
 }
+
+data class DomainDashboardUiState(
+    val isSyncing: Boolean = false,
+    val syncError: String? = null,
+    val profile: UserEntity? = null,
+    val settings: UserSettingsEntity? = null,
+    val cases: List<CaseEntity> = emptyList(),
+    val teamMembers: List<TeamMemberEntity> = emptyList(),
+    val billing: BillingEntity? = null,
+    val chatMessages: List<ChatMessageEntity> = emptyList(),
+)
 
 /**
  * ViewModel for the Dental Implant Planning Dashboard.
@@ -57,13 +79,21 @@ class PlanningViewModel(application: Application) : AndroidViewModel(application
 
     private val repository = ImplantRepository(application)
     private val localRepository = LocalMedicalRepository(application)
+    private val unifiedRepository = UnifiedDomainRepository(application)
     private val reportGenerator = ReportGenerator(application)
+    private var domainSyncOrchestrator: DomainSyncOrchestrator? = null
+    private var domainObserverJob: Job? = null
+    private var currentUserId: Int? = null
+    private var currentUserEmail: String = ""
 
     private val _uiState = MutableStateFlow<PlanningUiState>(PlanningUiState.Idle)
     val uiState: StateFlow<PlanningUiState> = _uiState.asStateFlow()
 
     private val _authState = MutableStateFlow<AuthUiState>(AuthUiState.Loading)
     val authState: StateFlow<AuthUiState> = _authState.asStateFlow()
+
+    private val _domainState = MutableStateFlow(DomainDashboardUiState())
+    val domainState: StateFlow<DomainDashboardUiState> = _domainState.asStateFlow()
 
     /** Updated when user taps a specific tooth region */
     private val _tapMetrics = MutableStateFlow<BoneMetrics?>(null)
@@ -87,10 +117,11 @@ class PlanningViewModel(application: Application) : AndroidViewModel(application
     init {
         val hasSession = repository.hasActiveSession()
         val email = repository.getSavedEmail().orEmpty()
-        _authState.value = if (hasSession) {
-            AuthUiState.Authenticated(email = email)
+        if (hasSession) {
+            val userId = repository.getSavedUserId() ?: stableLocalUserId(email)
+            handleAuthenticated(email = email, userId = userId)
         } else {
-            AuthUiState.Unauthenticated
+            _authState.value = AuthUiState.Unauthenticated
         }
     }
 
@@ -100,7 +131,7 @@ class PlanningViewModel(application: Application) : AndroidViewModel(application
             repository.login(email, password).collect { result ->
                 result.fold(
                     onSuccess = { auth ->
-                        _authState.value = AuthUiState.Authenticated(auth.user.email)
+                        handleAuthenticated(auth.user.email, auth.user.id)
                     },
                     onFailure = { err ->
                         _authState.value = AuthUiState.Error(err.message ?: "Login failed")
@@ -116,7 +147,7 @@ class PlanningViewModel(application: Application) : AndroidViewModel(application
             repository.signup(email, password).collect { result ->
                 result.fold(
                     onSuccess = { auth ->
-                        _authState.value = AuthUiState.Authenticated(auth.user.email)
+                        handleAuthenticated(auth.user.email, auth.user.id)
                     },
                     onFailure = { err ->
                         _authState.value = AuthUiState.Error(err.message ?: "Signup failed")
@@ -133,9 +164,114 @@ class PlanningViewModel(application: Application) : AndroidViewModel(application
     }
 
     fun logout() {
+        domainSyncOrchestrator?.stop()
+        domainObserverJob?.cancel()
+        _domainState.value = DomainDashboardUiState()
+        currentUserId = null
+        currentUserEmail = ""
         repository.logout()
         reset()
         _authState.value = AuthUiState.Unauthenticated
+    }
+
+    fun refreshDomainData() {
+        viewModelScope.launch {
+            domainSyncOrchestrator?.triggerSync()
+        }
+    }
+
+    fun updateProfile(
+        name: String,
+        phone: String?,
+        practiceName: String?,
+        bio: String?,
+        specialty: String?,
+    ) {
+        val userId = currentUserId ?: return
+        val email = currentUserEmail
+        if (email.isBlank()) return
+
+        viewModelScope.launch {
+            unifiedRepository.optimisticUpdateProfile(
+                userId = userId,
+                email = email,
+                name = name,
+                phone = phone,
+                practiceName = practiceName,
+                bio = bio,
+                specialty = specialty,
+            ).onFailure { err ->
+                _domainState.value = _domainState.value.copy(syncError = err.message)
+            }
+        }
+    }
+
+    fun updateSettings(theme: String, language: String) {
+        val userId = currentUserId ?: return
+        viewModelScope.launch {
+            unifiedRepository.optimisticUpdateSettings(userId, theme, language)
+                .onFailure { err ->
+                    _domainState.value = _domainState.value.copy(syncError = err.message)
+                }
+        }
+    }
+
+    fun createCase(
+        firstName: String,
+        lastName: String,
+        age: Int,
+        toothNumber: String,
+        complaint: String,
+        caseType: String,
+    ) {
+        val userId = currentUserId ?: return
+        viewModelScope.launch {
+            unifiedRepository.optimisticCreateCase(
+                userId,
+                CaseCreateRequest(
+                    fname = firstName,
+                    lname = lastName,
+                    patientAge = age,
+                    toothNumber = toothNumber,
+                    complaint = complaint,
+                    caseType = caseType,
+                )
+            ).onFailure { err ->
+                _domainState.value = _domainState.value.copy(syncError = err.message)
+            }
+        }
+    }
+
+    fun addTeamMember(name: String, email: String, role: String) {
+        val userId = currentUserId ?: return
+        viewModelScope.launch {
+            unifiedRepository.optimisticAddTeamMember(userId, name, email, role)
+                .onFailure { err ->
+                    _domainState.value = _domainState.value.copy(syncError = err.message)
+                }
+        }
+    }
+
+    fun removeTeamMember(memberId: Int) {
+        val userId = currentUserId ?: return
+        viewModelScope.launch {
+            unifiedRepository.optimisticRemoveTeamMember(userId, memberId)
+                .onFailure { err ->
+                    _domainState.value = _domainState.value.copy(syncError = err.message)
+                }
+        }
+    }
+
+    fun sendChatMessage(message: String) {
+        val userId = currentUserId ?: return
+        if (message.isBlank()) return
+
+        viewModelScope.launch {
+            unifiedRepository.sendChatAndPersist(userId, message.trim())
+                .onFailure { err ->
+                    _domainState.value = _domainState.value.copy(syncError = err.message)
+                }
+        }
     }
 
     // ─────────────────────────────────────────────
@@ -373,5 +509,68 @@ class PlanningViewModel(application: Application) : AndroidViewModel(application
         val path = uri.toString().lowercase()
         if (path.endsWith(".dcm") || path.endsWith(".dicom")) return false
         return path.endsWith(".jpg") || path.endsWith(".jpeg") || path.endsWith(".png")
+    }
+
+    private fun handleAuthenticated(email: String, userId: Int) {
+        currentUserEmail = email
+        currentUserId = userId
+        _authState.value = AuthUiState.Authenticated(email = email, userId = userId)
+        startDomainObservers(userId)
+        if (domainSyncOrchestrator == null) {
+            domainSyncOrchestrator = DomainSyncOrchestrator(
+                scope = viewModelScope,
+                repository = unifiedRepository,
+                userIdProvider = { currentUserId },
+                fallbackEmailProvider = { currentUserEmail },
+                onSyncStateChanged = { isSyncing, error ->
+                    _domainState.value = _domainState.value.copy(
+                        isSyncing = isSyncing,
+                        syncError = error,
+                    )
+                },
+            )
+        }
+        domainSyncOrchestrator?.start(intervalMs = 120_000L)
+    }
+
+    private fun startDomainObservers(userId: Int) {
+        domainObserverJob?.cancel()
+        domainObserverJob = viewModelScope.launch {
+            unifiedRepository.observeUser(userId)
+                .combine(unifiedRepository.observeSettings(userId)) { profile, settings ->
+                    profile to settings
+                }
+                .combine(unifiedRepository.observeCases(userId)) { profileSettings, cases ->
+                    Triple(profileSettings.first, profileSettings.second, cases)
+                }
+                .combine(unifiedRepository.observeTeam(userId)) { profileSettingsCases, team ->
+                    DomainDashboardUiState(
+                        isSyncing = _domainState.value.isSyncing,
+                        syncError = _domainState.value.syncError,
+                        profile = profileSettingsCases.first,
+                        settings = profileSettingsCases.second,
+                        cases = profileSettingsCases.third,
+                        teamMembers = team,
+                        billing = _domainState.value.billing,
+                        chatMessages = _domainState.value.chatMessages,
+                    )
+                }
+                .combine(unifiedRepository.observeBilling(userId)) { baseState, billing ->
+                    baseState.copy(billing = billing)
+                }
+                .combine(unifiedRepository.observeChat(userId)) { baseState, chat ->
+                    baseState.copy(chatMessages = chat)
+                }
+                .collect { merged ->
+                _domainState.value = merged
+            }
+        }
+    }
+
+    private fun stableLocalUserId(email: String): Int {
+        if (email.isBlank()) return 1_000_001
+        val hash = email.trim().lowercase().hashCode()
+        val normalized = if (hash == Int.MIN_VALUE) 1 else abs(hash)
+        return 1_000_000 + normalized
     }
 }

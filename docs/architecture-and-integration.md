@@ -3,8 +3,7 @@
 ## Current Topology
 - Mobile app (`app/`): Kotlin + Compose, network analysis flow.
 - Website frontend (`website/frontend/`): React + Vite.
-- Website backend (`website/backend_fastapi/`): CRUD/auth/settings API.
-- Processing backend (`backend/`): CBCT/panoramic analysis + auth endpoints.
+- Unified backend (`backend/`): web CRUD/auth/settings + CBCT/panoramic analysis endpoints.
 
 ## Refactor Implemented
 

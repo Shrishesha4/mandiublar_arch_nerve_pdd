@@ -5,16 +5,39 @@ import com.s4.belsson.data.local.AppDatabase
 import com.s4.belsson.data.local.entity.MedicalReportEntity
 import com.s4.belsson.data.local.entity.PatientEntity
 import com.s4.belsson.data.model.AnalysisResponse
-//import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.Flow
 
 class LocalMedicalRepository(context: Context) {
     private val database = AppDatabase.getInstance(context)
     private val patientDao = database.patientDao()
     private val reportDao = database.medicalReportDao()
 
-//    fun observePatients(): Flow<List<PatientEntity>> = patientDao.observeAll()
+    fun observePatients(): Flow<List<PatientEntity>> = patientDao.observeAll()
 
-//    fun observeReports(): Flow<List<MedicalReportEntity>> = reportDao.observeAll()
+    fun observeReports(): Flow<List<MedicalReportEntity>> = reportDao.observeAll()
+
+    fun observeReportsByPatient(patientId: Long): Flow<List<MedicalReportEntity>> =
+        reportDao.observeByPatient(patientId)
+
+    suspend fun addPatient(
+        firstName: String,
+        lastName: String,
+        dob: String? = null,
+        gender: String? = null,
+        phone: String? = null,
+        email: String? = null,
+    ): Long {
+        return patientDao.upsert(
+            PatientEntity(
+                firstName = firstName,
+                lastName = lastName,
+                dob = dob,
+                gender = gender,
+                phone = phone,
+                email = email,
+            )
+        )
+    }
 
     suspend fun upsertPatientFromAnalysis(analysis: AnalysisResponse): Long {
         val names = analysis.patientName.trim().split(" ").filter { it.isNotBlank() }

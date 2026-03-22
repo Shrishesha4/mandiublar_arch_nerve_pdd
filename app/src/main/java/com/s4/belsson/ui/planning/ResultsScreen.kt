@@ -288,13 +288,6 @@ fun ResultsScreen(
             }
 
             Spacer(modifier = Modifier.height(10.dp))
-
-            OutlinedButton(
-                onClick = onLogout,
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Text("Logout")
-            }
         }
 
         Spacer(modifier = Modifier.height(24.dp))

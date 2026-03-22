@@ -3,8 +3,10 @@
 This backend now supports:
 
 - SQLite-based signup/login (`/auth/signup`, `/auth/login`)
+- Web-compatible auth (`/login`, `/register`)
 - Token-protected analysis endpoints
 - Dedicated panoramic endpoint for mandibular canal tracing (`/analyze-panoramic`)
+- Web dashboard APIs: cases, profile, settings, team, billing, chat
 - CBCT series reconstruction from:
   - single `.dcm` (legacy)
   - `.zip` archive containing many `.dcm` slices
@@ -38,6 +40,19 @@ uvicorn main:app --reload --port 8000
    - `POST /analyze-jaw`
    - `POST /analyze-panoramic`
    - `POST /measure`
+   - `GET/POST /cases`, `GET /cases/{id}`, `PUT /cases/{id}/status`, `POST /cases/{id}/upload`
+   - `POST /analysis/run/{case_id}`, `GET /analysis/result/{case_id}`
+   - `GET/PUT /user`, `GET/PUT /settings`, `GET/POST/DELETE /team`, `GET/POST /billing`
+   - `POST /chat`
+
+## Unified Client Compatibility
+
+- Android app uses:
+  - `/auth/signup`, `/auth/login`, `/analyze-jaw`, `/analyze-panoramic`, `/measure`
+- Web app uses:
+  - `/login`, `/register`, `/cases*`, `/analysis/run*`, `/analysis/result*`, `/user`, `/chat`, `/settings`, `/team`, `/billing`
+
+Both clients now run against this single `backend/` service.
 
 ## Tests
 

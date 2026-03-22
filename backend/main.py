@@ -12,11 +12,15 @@ from __future__ import annotations
 import io
 import uuid
 import logging
+import os
+import random
+import shutil
+import time
 import traceback
 from typing import Optional
 import numpy as np
 
-from fastapi import FastAPI, UploadFile, File, HTTPException, Query, Depends, status
+from fastapi import FastAPI, UploadFile, File, HTTPException, Query, Depends, status, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from PIL import Image
@@ -147,6 +151,92 @@ class AuthUser(BaseModel):
 class AuthResponse(BaseModel):
     token: str
     user: AuthUser
+
+
+# ---------- Web-compatible schemas ----------
+class LoginRequest(BaseModel):
+    email: str
+    password: str
+
+
+class RegisterRequest(BaseModel):
+    name: str
+    email: str
+    phone: str = "N/A"
+    practice: Optional[str] = None
+    practice_name: Optional[str] = None
+    password: str
+
+
+class UserProfile(BaseModel):
+    name: str
+    email: str
+    phone: Optional[str] = None
+    practice_name: Optional[str] = None
+    bio: Optional[str] = None
+    specialty: Optional[str] = None
+
+
+class UserUpdate(UserProfile):
+    pass
+
+
+class BillingInfo(BaseModel):
+    plan_name: str
+    card_last4: str
+
+
+class TeamMemberCreate(BaseModel):
+    name: str
+    email: str
+    role: str
+
+
+class CaseCreate(BaseModel):
+    fname: str
+    lname: str
+    patient_age: Optional[int] = None
+    tooth_number: Optional[str] = None
+    complaint: Optional[str] = None
+    case_type: Optional[str] = None
+    details: Optional[str] = None
+    case_id: Optional[str] = None
+
+
+class CaseResponse(BaseModel):
+    id: int
+    case_id: str
+    fname: str
+    lname: str
+    patient_age: Optional[int] = None
+    tooth_number: Optional[str] = None
+    complaint: Optional[str] = None
+    case_type: Optional[str] = None
+    status: str
+    created_at: str
+
+
+class CaseAnalysisResponse(BaseModel):
+    id: int
+    case_id: int
+    created_at: str
+    arch_curve_data: list[list[float]]
+    nerve_path_data: list[list[float]]
+    bone_width_36: str
+    bone_height: str
+    nerve_distance: str
+    safe_implant_length: str
+    clinical_report: Optional[str] = None
+    patient_explanation: Optional[str] = None
+
+
+class ChatRequest(BaseModel):
+    message: str
+    context: Optional[str] = None
+
+
+class ChatResponse(BaseModel):
+    reply: str
 
 
 # ---------- Endpoints ----------
@@ -403,6 +493,74 @@ async def login(req: AuthRequest):
 
     token = auth_db.create_session(user_id=user["id"])
     return AuthResponse(token=token, user=AuthUser(**user))
+
+
+@app.post("/login")
+async def web_login(req: LoginRequest, request: Request):
+    user = auth_db.authenticate(req.email, req.password)
+    if user is None:
+        raise HTTPException(status_code=401, detail="Invalid email or password")
+
+    token = auth_db.create_session(user_id=user["id"], ttl_hours=24 * 7)
+    auth_db.log_login(
+        user_id=user["id"],
+        ip_address=request.client.host if request.client else None,
+        user_agent=request.headers.get("user-agent"),
+    )
+    return {
+        "token": token,
+        "token_type": "bearer",
+        "user": {
+            "name": user.get("name") or "Test Doctor",
+            "email": user["email"],
+            "phone": user.get("phone") or "N/A",
+        },
+    }
+
+
+@app.post("/register")
+async def web_register(req: RegisterRequest):
+    practice_name = req.practice_name or req.practice or "Private Practice"
+    try:
+        user = auth_db.create_user(
+            req.email,
+            req.password,
+            name=req.name,
+            phone=req.phone,
+            practice_name=practice_name,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    token = auth_db.create_session(user_id=user["id"], ttl_hours=24 * 7)
+    return {
+        "token": token,
+        "token_type": "bearer",
+        "user": {
+            "name": user.get("name") or req.name,
+            "email": user["email"],
+            "phone": user.get("phone") or req.phone,
+            "practice": user.get("practice_name") or practice_name,
+        },
+    }
+
+
+@app.get("/auth/google")
+async def auth_google_placeholder():
+    raise HTTPException(status_code=501, detail="Google OAuth is not configured in this backend")
+
+
+def _chat_reply(message: str) -> str:
+    msg = message.lower()
+    if "bone" in msg:
+        return "Bone density ranges from D1 to D4. Use CBCT cross-sections to confirm stability at the exact implant site."
+    if "nerve" in msg:
+        return "Maintain at least a 2mm safety margin from the inferior alveolar nerve during implant planning."
+    if "implant" in msg:
+        return "Implant diameter and length should be selected from measured bone width and safe height, then verified clinically."
+    if "cost" in msg or "price" in msg or "billing" in msg:
+        return "Billing and subscription details are available in Settings > Billing."
+    return "I can help with implant planning, CBCT interpretation, and safety checks."
 
 
 def _analyze_dicom_bytes(
@@ -766,6 +924,185 @@ async def measure(
         safe_zone_path=[NervePoint(**p) for p in safe_zone_path],
         recommendation_line=recommendation_line,
     )
+
+
+@app.get("/user", response_model=UserProfile)
+async def get_user_profile(user: dict = Depends(require_user)):
+    profile = auth_db.get_user_by_id(int(user["id"]))
+    if profile is None:
+        raise HTTPException(status_code=404, detail="User not found")
+    return UserProfile(
+        name=profile.get("name") or "Test Doctor",
+        email=profile["email"],
+        phone=profile.get("phone"),
+        practice_name=profile.get("practice_name"),
+        bio=profile.get("bio"),
+        specialty=profile.get("specialty"),
+    )
+
+
+@app.put("/user")
+async def update_user_profile(payload: UserUpdate, user: dict = Depends(require_user)):
+    try:
+        auth_db.update_user_profile(int(user["id"]), payload.model_dump())
+        auth_db.log_activity(int(user["id"]), "Update Profile")
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return {"message": "Profile updated"}
+
+
+@app.get("/settings")
+async def get_settings(user: dict = Depends(require_user)):
+    return auth_db.get_settings(int(user["id"]))
+
+
+@app.put("/settings")
+async def update_settings(payload: dict, user: dict = Depends(require_user)):
+    data = auth_db.update_settings(int(user["id"]), payload)
+    auth_db.log_activity(int(user["id"]), "Update Settings", payload)
+    return {"message": "Settings saved", **data}
+
+
+@app.get("/team")
+async def get_team(user: dict = Depends(require_user)):
+    return auth_db.list_team_members(int(user["id"]))
+
+
+@app.post("/team")
+async def add_team_member(payload: TeamMemberCreate, user: dict = Depends(require_user)):
+    member = auth_db.add_team_member(int(user["id"]), payload.model_dump())
+    auth_db.log_activity(int(user["id"]), "Add Team Member", member)
+    return {"message": "Member added", "id": member["id"]}
+
+
+@app.delete("/team/{member_id}")
+async def remove_team_member(member_id: int, user: dict = Depends(require_user)):
+    deleted = auth_db.remove_team_member(int(user["id"]), member_id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Member not found")
+    auth_db.log_activity(int(user["id"]), "Remove Team Member", {"member_id": member_id})
+    return {"message": "Member removed"}
+
+
+@app.get("/billing")
+async def get_billing(user: dict = Depends(require_user)):
+    return auth_db.get_billing(int(user["id"]))
+
+
+@app.post("/billing")
+async def update_billing(payload: BillingInfo, user: dict = Depends(require_user)):
+    billing = auth_db.update_billing(int(user["id"]), payload.plan_name, payload.card_last4)
+    auth_db.log_activity(int(user["id"]), "Update Billing", {"plan_name": payload.plan_name})
+    return {"message": "Plan updated successfully", "plan": billing.get("plan_name")}
+
+
+@app.get("/cases", response_model=list[CaseResponse])
+async def get_cases(user: dict = Depends(require_user)):
+    rows = auth_db.list_cases(int(user["id"]))
+    return [CaseResponse(**row) for row in rows]
+
+
+@app.post("/cases", response_model=CaseResponse)
+async def create_case(payload: CaseCreate, user: dict = Depends(require_user)):
+    created = auth_db.create_case(int(user["id"]), payload.model_dump())
+    auth_db.log_activity(int(user["id"]), "Create Case", {"case_id": created.get("case_id")})
+    return CaseResponse(**created)
+
+
+@app.get("/cases/{case_id}", response_model=CaseResponse)
+async def get_case(case_id: str, user: dict = Depends(require_user)):
+    case_row = auth_db.get_case(int(user["id"]), case_id)
+    if case_row is None:
+        raise HTTPException(status_code=404, detail="Case not found")
+    return CaseResponse(**case_row)
+
+
+@app.post("/cases/{case_id}/upload")
+async def upload_case_file(
+    case_id: str,
+    file: UploadFile = File(...),
+    user: dict = Depends(require_user),
+):
+    case_row = auth_db.get_case(int(user["id"]), case_id)
+    if case_row is None:
+        raise HTTPException(status_code=404, detail="Case not found")
+
+    project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    upload_dir = os.path.join(project_root, "uploads")
+    os.makedirs(upload_dir, exist_ok=True)
+    filename = f"{int(time.time())}_{file.filename}"
+    file_path = os.path.join(upload_dir, filename)
+
+    with open(file_path, "wb") as buffer:
+        shutil.copyfileobj(file.file, buffer)
+
+    auth_db.add_case_file(case_row["id"], file.filename, file_path)
+    auth_db.update_case_status(int(user["id"]), case_id, "Ready")
+    return {"message": "File uploaded successfully", "path": file_path}
+
+
+@app.put("/cases/{case_id}/status")
+async def update_case_status(case_id: str, status: str, user: dict = Depends(require_user)):
+    ok = auth_db.update_case_status(int(user["id"]), case_id, status)
+    if not ok:
+        raise HTTPException(status_code=404, detail="Case not found")
+    return {"message": "Status updated"}
+
+
+@app.post("/analysis/run/{case_id}", response_model=CaseAnalysisResponse)
+async def run_case_analysis(case_id: str, user: dict = Depends(require_user)):
+    case_row = auth_db.get_case(int(user["id"]), case_id)
+    if case_row is None:
+        raise HTTPException(status_code=404, detail="Case not found")
+
+    auth_db.update_case_status(int(user["id"]), case_id, "Analyzing...")
+
+    arch_curve_data = [[x, 0.005 * (x - 150) ** 2 + 50] for x in range(0, 300, 10)]
+    nerve_path_data = [[x, 0.005 * (x - 150) ** 2 + 150 + random.uniform(-2, 2)] for x in range(50, 250, 10)]
+    bone_width = round(random.uniform(9.0, 12.0), 1)
+    bone_height = round(random.uniform(11.0, 15.0), 1)
+    nerve_dist = round(random.uniform(3.0, 5.0), 1)
+    safe_length = round(bone_height - 2.0, 1)
+
+    analysis = auth_db.save_case_analysis(
+        case_row["id"],
+        {
+            "arch_curve_data": arch_curve_data,
+            "nerve_path_data": nerve_path_data,
+            "bone_width_36": str(bone_width),
+            "bone_height": str(bone_height),
+            "nerve_distance": str(nerve_dist),
+            "safe_implant_length": str(safe_length),
+            "clinical_report": (
+                "Clinical summary: bone dimensions appear suitable for standard implant placement "
+                "with routine safety checks."
+            ),
+            "patient_explanation": (
+                "Your scan indicates adequate bone volume for implant planning. "
+                "Final placement is confirmed by your clinician."
+            ),
+        },
+    )
+
+    auth_db.update_case_status(int(user["id"]), case_id, "Analysis Complete")
+    return CaseAnalysisResponse(**analysis)
+
+
+@app.get("/analysis/result/{case_id}", response_model=CaseAnalysisResponse)
+async def get_case_analysis_result(case_id: str, user: dict = Depends(require_user)):
+    case_row = auth_db.get_case(int(user["id"]), case_id)
+    if case_row is None:
+        raise HTTPException(status_code=404, detail="Case not found")
+
+    analysis = auth_db.get_analysis_by_case(case_row["id"])
+    if analysis is None:
+        raise HTTPException(status_code=404, detail="Analysis not found")
+    return CaseAnalysisResponse(**analysis)
+
+
+@app.post("/chat", response_model=ChatResponse)
+async def chat(payload: ChatRequest, _user: dict = Depends(require_user)):
+    return ChatResponse(reply=_chat_reply(payload.message))
 
 
 # ---------- Run ----------

@@ -36,7 +36,7 @@ class ImplantRepository(private val context: Context) {
     fun signup(email: String, password: String): Flow<Result<AuthResponse>> = flow {
         try {
             val response = ImplantApiService.signup(email.trim(), password)
-            sessionStore.saveSession(response.token, response.user.email)
+            sessionStore.saveSession(response.token, response.user.email, response.user.id)
             ImplantApiService.setAuthToken(response.token)
             emit(Result.success(response))
         } catch (e: Exception) {
@@ -47,7 +47,7 @@ class ImplantRepository(private val context: Context) {
     fun login(email: String, password: String): Flow<Result<AuthResponse>> = flow {
         try {
             val response = ImplantApiService.login(email.trim(), password)
-            sessionStore.saveSession(response.token, response.user.email)
+            sessionStore.saveSession(response.token, response.user.email, response.user.id)
             ImplantApiService.setAuthToken(response.token)
             emit(Result.success(response))
         } catch (e: Exception) {
@@ -61,6 +61,8 @@ class ImplantRepository(private val context: Context) {
     }
 
     fun getSavedEmail(): String? = sessionStore.getEmail()
+
+    fun getSavedUserId(): Int? = sessionStore.getUserId()
 
     fun hasActiveSession(): Boolean = !sessionStore.getToken().isNullOrBlank()
 

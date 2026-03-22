@@ -12,23 +12,14 @@ Path: `website/frontend`
 4. Run dev server:
    - `npm run dev`
 
-## Website FastAPI Backend
-Path: `website/backend_fastapi`
-
-1. Create venv and activate.
-2. Install dependencies:
-   - `pip install -r requirements.txt`
-3. Run API:
-   - `uvicorn main:app --reload --port 8000`
-
-## Processing Backend (CBCT)
+## Unified Backend (Web + Android + CBCT)
 Path: `backend`
 
 1. Create venv and activate.
 2. Install dependencies:
    - `pip install -r requirements.txt`
 3. Run API:
-   - `uvicorn main:app --reload --port 8001`
+   - `uvicorn main:app --reload --port 8000`
 
 ## Android App
 Path: `app`

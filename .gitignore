@@ -16,3 +16,8 @@ local.properties
 .venv
 __pycache__
 *.pyc
+node_modules
+dist
+build
+*.log
+frontend/node_modules

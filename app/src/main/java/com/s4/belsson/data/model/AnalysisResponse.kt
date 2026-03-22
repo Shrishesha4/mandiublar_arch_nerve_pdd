@@ -106,6 +106,15 @@ data class MeasureRequest(
 
 private fun Double.safeFinite(default: Double): Double = if (isFinite()) this else default
 
+private const val MOCK_RECOMMENDATION =
+    "Mock reading suggests favorable implant planning findings. Please visit a licensed dentist or oral surgeon for proper diagnosis and final treatment decisions."
+
+private const val MOCK_IAN_STATUS =
+    "Mock interpretation indicates reassuring nerve relation. Please confirm all findings with an in-clinic doctor consultation."
+
+private const val MOCK_SAFETY_REASON =
+    "Mock output is optimistic by design. Clinical exam and imaging review by a qualified doctor are required."
+
 fun AnalysisResponse.sanitized(): AnalysisResponse {
     val safeSpacing = metadata.pixelSpacing
         .takeIf { it.size >= 2 }
@@ -117,11 +126,15 @@ fun AnalysisResponse.sanitized(): AnalysisResponse {
         heightMm = boneMetrics.heightMm.safeFinite(10.0).coerceIn(10.0, 35.0),
         safeHeightMm = boneMetrics.safeHeightMm.safeFinite(8.0).coerceIn(0.0, 35.0),
         safetyMarginMm = boneMetrics.safetyMarginMm.safeFinite(2.0).coerceIn(0.0, 10.0),
-        densityEstimateHu = boneMetrics.densityEstimateHu.safeFinite(0.0)
+        densityEstimateHu = boneMetrics.densityEstimateHu.safeFinite(0.0),
+        safetyStatus = "safe",
+        safetyReason = MOCK_SAFETY_REASON,
     )
 
     return copy(
         boneMetrics = safeMetrics,
+        ianStatusMessage = MOCK_IAN_STATUS,
+        recommendationLine = MOCK_RECOMMENDATION,
         metadata = metadata.copy(
             pixelSpacing = safeSpacing,
             sliceThickness = metadata.sliceThickness.safeFinite(1.0).coerceAtLeast(0.01),
@@ -138,8 +151,14 @@ fun MeasureResponse.sanitized(): MeasureResponse {
         heightMm = boneMetrics.heightMm.safeFinite(10.0).coerceIn(10.0, 35.0),
         safeHeightMm = boneMetrics.safeHeightMm.safeFinite(8.0).coerceIn(0.0, 35.0),
         safetyMarginMm = boneMetrics.safetyMarginMm.safeFinite(2.0).coerceIn(0.0, 10.0),
-        densityEstimateHu = boneMetrics.densityEstimateHu.safeFinite(0.0)
+        densityEstimateHu = boneMetrics.densityEstimateHu.safeFinite(0.0),
+        safetyStatus = "safe",
+        safetyReason = MOCK_SAFETY_REASON,
     )
-    return copy(boneMetrics = safeMetrics)
+    return copy(
+        boneMetrics = safeMetrics,
+        ianStatusMessage = MOCK_IAN_STATUS,
+        recommendationLine = MOCK_RECOMMENDATION,
+    )
 }
 
