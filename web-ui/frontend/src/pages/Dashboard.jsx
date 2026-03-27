@@ -37,8 +37,10 @@ export default function Dashboard() {
     }, []);
 
     const handleCaseCreated = async (newCase) => {
-        // Re-fetch or add to state
         await loadCases();
+        if (newCase?.id) {
+            navigate(`/cases/${encodeURIComponent(newCase.id)}`);
+        }
     };
 
     return (
@@ -102,7 +104,7 @@ export default function Dashboard() {
                                         </td>
                                         <td className="action-cell">
                                             <CaretRight
-                                                onClick={() => navigate(`/report?name=${encodeURIComponent(c.fname + ' ' + c.lname)}&id=${encodeURIComponent(c.id)}`)}
+                                                onClick={() => navigate(`/cases/${encodeURIComponent(c.id)}`)}
                                                 style={{ cursor: 'pointer', padding: '0px' }}
                                             />
                                         </td>

@@ -174,6 +174,12 @@ data class CaseAnalysisResponse(
     val nerveDistance: String,
     @SerialName("safe_implant_length")
     val safeImplantLength: String,
+    @SerialName("opg_image_base64")
+    val opgImageBase64: String? = null,
+    @SerialName("ian_status_message")
+    val ianStatusMessage: String? = null,
+    @SerialName("recommendation_line")
+    val recommendationLine: String? = null,
     @SerialName("clinical_report")
     val clinicalReport: String? = null,
     @SerialName("patient_explanation")

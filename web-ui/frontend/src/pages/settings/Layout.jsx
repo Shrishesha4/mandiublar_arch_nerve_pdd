@@ -6,11 +6,7 @@ import {
     Bell,
     ShieldCheck,
     Users,
-    Plugs,
-    CreditCard,
     Palette,
-    Globe,
-    Question,
     Info,
     Trash
 } from '@phosphor-icons/react';
@@ -48,28 +44,12 @@ export default function SettingsLayout() {
                         <NavLink to="team" className={({ isActive }) => `settings-nav-item ${isActive ? 'active' : ''}`}>
                             <Users size={18} /> Team Members
                         </NavLink>
-                        <NavLink to="integrations" className={({ isActive }) => `settings-nav-item ${isActive ? 'active' : ''}`}>
-                            <Plugs size={18} /> Integrations
-                        </NavLink>
-                        <NavLink to="billing" className={({ isActive }) => `settings-nav-item ${isActive ? 'active' : ''}`}>
-                            <CreditCard size={18} /> Billing & Plans
-                        </NavLink>
                     </div>
 
                     <div>
                         <div className="settings-group-title">Preferences</div>
                         <NavLink to="appearance" className={({ isActive }) => `settings-nav-item ${isActive ? 'active' : ''}`}>
                             <Palette size={18} /> Appearance
-                        </NavLink>
-                        <NavLink to="language" className={({ isActive }) => `settings-nav-item ${isActive ? 'active' : ''}`}>
-                            <Globe size={18} /> Language & Region
-                        </NavLink>
-                    </div>
-
-                    <div>
-                        <div className="settings-group-title">Support</div>
-                        <NavLink to="help" className={({ isActive }) => `settings-nav-item ${isActive ? 'active' : ''}`}>
-                            <Question size={18} /> Help & Support
                         </NavLink>
                         <NavLink to="about" className={({ isActive }) => `settings-nav-item ${isActive ? 'active' : ''}`}>
                             <Info size={18} /> About

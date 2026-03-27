@@ -2,7 +2,6 @@ import React from 'react';
 import { NavLink, useLocation } from 'react-router-dom';
 import {
     SquaresFour,
-    UploadSimple,
     Heartbeat,
     FileText,
     Gear,
@@ -33,10 +32,6 @@ export default function Sidebar({ isOpen, onClose }) {
                 <NavLink to="/dashboard" className="nav-item" end onClick={onClose}>
                     <SquaresFour size={20} />
                     <span>Dashboard</span>
-                </NavLink>
-                <NavLink to="/upload" className="nav-item" onClick={onClose}>
-                    <UploadSimple size={20} />
-                    <span>Upload</span>
                 </NavLink>
                 <NavLink to="/analysis" className="nav-item" onClick={onClose}>
                     <Heartbeat size={20} />

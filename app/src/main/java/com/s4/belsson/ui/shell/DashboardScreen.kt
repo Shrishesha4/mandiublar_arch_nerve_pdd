@@ -32,6 +32,7 @@ import com.s4.belsson.data.local.entity.CaseEntity
 fun DashboardScreen(
     cases: List<CaseEntity>,
     onCreateCase: (firstName: String, lastName: String, age: Int, tooth: String, complaint: String, caseType: String) -> Unit,
+    onOpenCase: (Long) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     var search by rememberSaveable { mutableStateOf("") }
@@ -79,6 +80,10 @@ fun DashboardScreen(
                     Text("Type: ${item.caseType ?: "-"}")
                     Text("Status: ${item.status}")
                     Text("Date: ${item.createdAt}")
+                    Spacer(Modifier.height(4.dp))
+                    Button(onClick = { onOpenCase(item.id) }) {
+                        Text("Open Case")
+                    }
                 }
             }
         }
@@ -146,13 +151,13 @@ private fun CreateCaseDialog(
                         enabled = existingPatients.isNotEmpty(),
                         modifier = Modifier.weight(1f),
                     ) {
-                        Text("Existing")
+                        Text("Existing Patient")
                     }
                     Button(
                         onClick = { assignExistingPatient = false },
                         modifier = Modifier.weight(1f),
                     ) {
-                        Text("New Patient")
+                        Text("Create New")
                     }
                 }
 
@@ -161,7 +166,7 @@ private fun CreateCaseDialog(
                         OutlinedTextField(
                             value = selectedExistingLabel,
                             onValueChange = { },
-                            label = { Text("Assign Existing Patient") },
+                            label = { Text("Select Existing Patient") },
                             readOnly = true,
                             modifier = Modifier.fillMaxWidth(),
                         )

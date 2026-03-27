@@ -3,18 +3,14 @@ import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-d
 import DashboardLayout from './layouts/DashboardLayout';
 import Dashboard from './pages/Dashboard';
 import Login from './pages/Login';
-import Upload from './pages/Upload';
 import Analysis from './pages/Analysis';
+import CaseRecord from './pages/CaseRecord';
 import SettingsLayout from './pages/settings/Layout';
 import Appearance from './pages/settings/Appearance';
 import Profile from './pages/settings/Profile';
-import Billing from './pages/settings/Billing';
-import Integrations from './pages/settings/Integrations';
 import Notifications from './pages/settings/Notifications';
-import Help from './pages/settings/Help';
 import About from './pages/settings/About';
 import Team from './pages/settings/Team';
-import Language from './pages/settings/Language';
 import Privacy from './pages/settings/Privacy';
 import Reports from './pages/Reports';
 import PageTransition from './components/PageTransition';
@@ -53,14 +49,14 @@ function App() {
                                 <Dashboard />
                             </PageTransition>
                         } />
-                        <Route path="/upload" element={
-                            <PageTransition>
-                                <Upload />
-                            </PageTransition>
-                        } />
                         <Route path="/analysis" element={
                             <PageTransition>
                                 <Analysis />
+                            </PageTransition>
+                        } />
+                        <Route path="/cases/:caseId" element={
+                            <PageTransition>
+                                <CaseRecord />
                             </PageTransition>
                         } />
                         <Route path="/reports" element={
@@ -82,15 +78,11 @@ function App() {
                             <Route path="team" element={<Team />} />
                             <Route path="notifications" element={<Notifications />} />
                             <Route path="privacy" element={<Privacy />} />
-                            <Route path="integrations" element={<Integrations />} />
-                            <Route path="billing" element={<Billing />} />
                             <Route path="appearance" element={
                                 <PageTransition>
                                     <Appearance />
                                 </PageTransition>
                             } />
-                            <Route path="language" element={<Language />} />
-                            <Route path="help" element={<Help />} />
                             <Route path="about" element={<About />} />
                             <Route path="delete-account" element={<Placeholder title="Delete Account" />} />
                         </Route>

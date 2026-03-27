@@ -15,6 +15,7 @@ import com.s4.belsson.data.local.entity.UserEntity
 import com.s4.belsson.data.local.entity.UserSettingsEntity
 import com.s4.belsson.data.model.AnalysisResponse
 import com.s4.belsson.data.model.BoneMetrics
+import com.s4.belsson.data.model.CaseAnalysisResponse
 import com.s4.belsson.data.model.CaseCreateRequest
 import com.s4.belsson.data.model.NervePathPoint
 import com.s4.belsson.data.model.PlanningOverlay
@@ -97,6 +98,15 @@ class PlanningViewModel(application: Application) : AndroidViewModel(application
 
     private val _selectedCaseId = MutableStateFlow<Long?>(null)
     val selectedCaseId: StateFlow<Long?> = _selectedCaseId.asStateFlow()
+
+    private val _caseFlowMessage = MutableStateFlow<String?>(null)
+    val caseFlowMessage: StateFlow<String?> = _caseFlowMessage.asStateFlow()
+
+    private val _caseFlowResult = MutableStateFlow<CaseAnalysisResponse?>(null)
+    val caseFlowResult: StateFlow<CaseAnalysisResponse?> = _caseFlowResult.asStateFlow()
+
+    private val _caseFlowBitmap = MutableStateFlow<Bitmap?>(null)
+    val caseFlowBitmap: StateFlow<Bitmap?> = _caseFlowBitmap.asStateFlow()
 
     /** Updated when user taps a specific tooth region */
     private val _tapMetrics = MutableStateFlow<BoneMetrics?>(null)
@@ -185,6 +195,10 @@ class PlanningViewModel(application: Application) : AndroidViewModel(application
 
     fun selectCase(caseId: Long?) {
         _selectedCaseId.value = caseId
+    }
+
+    fun clearCaseFlowMessage() {
+        _caseFlowMessage.value = null
     }
 
     fun updateProfile(
@@ -321,6 +335,51 @@ class PlanningViewModel(application: Application) : AndroidViewModel(application
                     }
                 )
             }
+        }
+    }
+
+    fun startCaseFlowAnalysis(archUri: Uri, ianUri: Uri) {
+        val localCaseId = _selectedCaseId.value
+        val selectedCase = _domainState.value.cases.firstOrNull { it.id == localCaseId }
+        val caseIdentifier = selectedCase?.caseId ?: selectedCase?.remoteId?.toString()
+
+        if (caseIdentifier.isNullOrBlank()) {
+            _uiState.value = PlanningUiState.Error("Select a patient case before starting analysis")
+            return
+        }
+
+        _caseFlowMessage.value = null
+        _caseFlowResult.value = null
+        _caseFlowBitmap.value = null
+        _uiState.value = PlanningUiState.Loading
+
+        viewModelScope.launch {
+            val uploadResult = repository.uploadFilesOnly(
+                caseId = caseIdentifier,
+                cbctUri = archUri,
+                panoramicUri = ianUri,
+            ).first()
+
+            uploadResult.fold(
+                onSuccess = {
+                    val analysisResult = repository.runCaseAnalysis(caseIdentifier).first()
+                    analysisResult.fold(
+                        onSuccess = { response ->
+                            _uiState.value = PlanningUiState.Idle
+                            _caseFlowResult.value = response
+                            _caseFlowBitmap.value = decodeBase64ToBitmap(response.opgImageBase64.orEmpty())
+                            _caseFlowMessage.value = "The results look good, but AI is not 100% accurate. Please consider expert clinical judgment."
+                            refreshDomainData()
+                        },
+                        onFailure = { err ->
+                            _uiState.value = PlanningUiState.Error(err.message ?: "Case analysis failed")
+                        },
+                    )
+                },
+                onFailure = { err ->
+                    _uiState.value = PlanningUiState.Error(err.message ?: "File upload failed")
+                },
+            )
         }
     }
 
@@ -519,6 +578,9 @@ class PlanningViewModel(application: Application) : AndroidViewModel(application
 
     fun reset() {
         _uiState.value = PlanningUiState.Idle
+        _caseFlowMessage.value = null
+        _caseFlowResult.value = null
+        _caseFlowBitmap.value = null
         _tapMetrics.value = null
         _tapOverlay.value = null
         _tapSafeZonePath.value = null

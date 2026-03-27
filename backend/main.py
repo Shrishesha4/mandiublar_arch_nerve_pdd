@@ -244,6 +244,14 @@ class CaseAnalysisResponse(BaseModel):
     patient_explanation: Optional[str] = None
 
 
+class CaseFileResponse(BaseModel):
+    id: int
+    case_id: int
+    filename: str
+    file_path: str
+    uploaded_at: str
+
+
 class HistoryReportSummary(BaseModel):
     case_id: str
     created_at: str
@@ -1174,6 +1182,15 @@ async def get_case(case_id: str, user: dict = Depends(require_user)):
     return CaseResponse(**case_row)
 
 
+@app.get("/cases/{case_id}/files", response_model=list[CaseFileResponse])
+async def get_case_files(case_id: str, user: dict = Depends(require_user)):
+    case_row = auth_db.get_case(int(user["id"]), case_id)
+    if case_row is None:
+        raise HTTPException(status_code=404, detail="Case not found")
+    rows = auth_db.list_case_files(case_row["id"])
+    return [CaseFileResponse(**row) for row in rows]
+
+
 @app.post("/cases/{case_id}/upload")
 async def upload_case_file(
     case_id: str,
@@ -1218,7 +1235,11 @@ async def run_case_analysis(case_id: str, user: dict = Depends(require_user)):
         auth_db.update_case_status(int(user["id"]), case_id, "Ready")
         raise HTTPException(status_code=400, detail="No uploaded files found for this case")
 
-    latest_file = files[-1]
+    arch_candidates = [
+        item for item in files
+        if "arch" in str(item.get("filename", "")).lower()
+    ]
+    latest_file = arch_candidates[-1] if arch_candidates else files[-1]
     file_path = latest_file.get("file_path") or ""
     if not file_path or not os.path.exists(file_path):
         auth_db.update_case_status(int(user["id"]), case_id, "Ready")

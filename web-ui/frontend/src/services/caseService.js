@@ -37,6 +37,15 @@ export const caseService = {
         }
     },
 
+    getCaseFiles: async (id) => {
+        try {
+            return await httpClient.get(`/cases/${id}/files`);
+        } catch (error) {
+            console.error('API Error (List Files):', error);
+            return [];
+        }
+    },
+
     getCaseById: async (id) => {
         try {
             return await httpClient.get(`/cases/${id}`);

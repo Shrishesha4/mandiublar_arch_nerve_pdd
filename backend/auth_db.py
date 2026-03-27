@@ -147,6 +147,8 @@ class AuthDatabase:
                     ian_status_message TEXT,
                     recommendation_line TEXT,
                     opg_image_base64 TEXT,
+                    arch_result_data TEXT,
+                    ian_result_data TEXT,
                     bone_width_36 TEXT,
                     bone_height TEXT,
                     nerve_distance TEXT,
@@ -687,11 +689,12 @@ class AuthDatabase:
                     case_id, arch_curve_data, nerve_path_data, planning_overlay_data,
                     safe_zone_path_data, workflow, scan_region, ian_applicable, ian_detected,
                     ian_status_message, recommendation_line, opg_image_base64,
+                    arch_result_data, ian_result_data,
                     bone_width_36, bone_height,
                     nerve_distance, safe_implant_length, clinical_report,
                     patient_explanation, created_at
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     case_pk,
@@ -706,6 +709,8 @@ class AuthDatabase:
                     str(analysis.get("ian_status_message", "")),
                     str(analysis.get("recommendation_line", "")),
                     analysis.get("opg_image_base64"),
+                    json.dumps(analysis.get("arch_result", {})),
+                    json.dumps(analysis.get("ian_result", {})),
                     str(analysis.get("bone_width_36", "")),
                     str(analysis.get("bone_height", "")),
                     str(analysis.get("nerve_distance", "")),
@@ -730,7 +735,8 @@ class AuthDatabase:
                 """
                 SELECT id, case_id, arch_curve_data, nerve_path_data, planning_overlay_data,
                        safe_zone_path_data, workflow, scan_region, ian_applicable, ian_detected,
-                      ian_status_message, recommendation_line, opg_image_base64,
+                        ian_status_message, recommendation_line, opg_image_base64,
+                        arch_result_data, ian_result_data,
                       bone_width_36, bone_height, nerve_distance, safe_implant_length,
                       clinical_report, patient_explanation, created_at
                 FROM analysis_results
@@ -754,13 +760,15 @@ class AuthDatabase:
             "ian_status_message": row[10] or "",
             "recommendation_line": row[11] or "",
             "opg_image_base64": row[12],
-            "bone_width_36": row[13],
-            "bone_height": row[14],
-            "nerve_distance": row[15],
-            "safe_implant_length": row[16],
-            "clinical_report": row[17],
-            "patient_explanation": row[18],
-            "created_at": row[19],
+            "arch_result": self._json_load(row[13], default={}),
+            "ian_result": self._json_load(row[14], default={}),
+            "bone_width_36": row[15],
+            "bone_height": row[16],
+            "nerve_distance": row[17],
+            "safe_implant_length": row[18],
+            "clinical_report": row[19],
+            "patient_explanation": row[20],
+            "created_at": row[21],
         }
 
     def list_patient_analysis_history(
@@ -922,6 +930,8 @@ class AuthDatabase:
             "ian_status_message": "TEXT",
             "recommendation_line": "TEXT",
             "opg_image_base64": "TEXT",
+            "arch_result_data": "TEXT",
+            "ian_result_data": "TEXT",
         }
         for col, typ in additions.items():
             if col not in existing:

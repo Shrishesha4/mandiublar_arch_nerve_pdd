@@ -11,8 +11,6 @@ export default function NewCaseModal({ isOpen, onClose, onCaseCreated, existingP
         fname: '',
         lname: '',
         age: '',
-        weight: '',
-        gender: '',
         tooth: '',
         medical: 'none',
         caseType: 'Single Implant'
@@ -120,26 +118,23 @@ export default function NewCaseModal({ isOpen, onClose, onCaseCreated, existingP
                     </div>
                     )}
 
-                    <div className="form-row">
-                        <div className="form-group" style={{ flex: 1 }}>
-                            <label>Age</label>
-                            <input type="number" className="form-input" placeholder="45" min="0" max="120" required={assignmentMode === 'new'}
-                                value={formData.age} onChange={e => handleInputChange('age', e.target.value)} />
+                    {assignmentMode === 'new' && (
+                        <div className="form-row">
+                            <div className="form-group" style={{ flex: 1 }}>
+                                <label>Age</label>
+                                <input
+                                    type="number"
+                                    className="form-input"
+                                    placeholder="45"
+                                    min="0"
+                                    max="120"
+                                    required
+                                    value={formData.age}
+                                    onChange={e => handleInputChange('age', e.target.value)}
+                                />
+                            </div>
                         </div>
-                        <div className="form-group" style={{ flex: 1 }}>
-                            <label>Weight (kg)</label>
-                            <input type="number" className="form-input" placeholder="70" min="0"
-                                value={formData.weight} onChange={e => handleInputChange('weight', e.target.value)} />
-                        </div>
-                        <div className="form-group" style={{ flex: 1 }}>
-                            <label>Gender</label>
-                            <select className="form-input" value={formData.gender} onChange={e => handleInputChange('gender', e.target.value)}>
-                                <option value="">Select</option>
-                                <option value="male">Male</option>
-                                <option value="female">Female</option>
-                            </select>
-                        </div>
-                    </div>
+                    )}
 
                     <div className="form-row">
                         <div className="form-group">
@@ -158,25 +153,6 @@ export default function NewCaseModal({ isOpen, onClose, onCaseCreated, existingP
                             </select>
                         </div>
                     </div>
-
-                    <div className="form-group" style={{ marginBottom: '1.5rem' }}>
-                        <label>Patient ID (Optional)</label>
-                        <input type="text" className="form-input" placeholder="Auto-generated if empty" />
-                    </div>
-
-                    {/* <div className="form-group">
-                        <label>Case Type</label>
-                        <div className="case-type-group">
-                            <div className={`type-option ${formData.caseType === 'Single Implant' ? 'active' : ''}`}
-                                onClick={() => handleInputChange('caseType', 'Single Implant')}>
-                                Single Implant
-                            </div>
-                            <div className={`type-option ${formData.caseType === 'Full Arch' ? 'active' : ''}`}
-                                onClick={() => handleInputChange('caseType', 'Full Arch')}>
-                                Full Arch
-                            </div>
-                        </div>
-                    </div> */}
 
                     <div className="modal-actions">
                         <button type="button" className="btn-cancel" onClick={onClose} disabled={isLoading}>Cancel</button>

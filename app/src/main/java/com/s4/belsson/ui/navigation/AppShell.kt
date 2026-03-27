@@ -25,14 +25,17 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavDestination.Companion.hierarchy
 import androidx.navigation.NavGraph.Companion.findStartDestination
+import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
+import androidx.navigation.navArgument
 import com.s4.belsson.ui.patients.PatientRecordsViewModel
 import com.s4.belsson.ui.patients.ReportHistoryScreen
 import com.s4.belsson.ui.planning.PlanningViewModel
 import com.s4.belsson.ui.shell.AnalysisScreen
+import com.s4.belsson.ui.shell.CaseFlowScreen
 import com.s4.belsson.ui.shell.DashboardScreen
 import com.s4.belsson.ui.shell.SettingsAboutPage
 import com.s4.belsson.ui.shell.SettingsAccountPage
@@ -72,7 +75,7 @@ fun AppShell(
         AppTab("dashboard", "Dashboard", { Icon(Icons.Filled.Home, contentDescription = "Dashboard") }),
         AppTab("upload", "Upload", { Icon(Icons.Filled.Add, contentDescription = "Upload") }),
         AppTab("analysis", "Analysis", { Icon(Icons.Filled.Search, contentDescription = "Analysis") }),
-        AppTab("reports", "Patients", { Icon(Icons.AutoMirrored.Filled.List, contentDescription = "Patients") }),
+        AppTab("reports", "Reports", { Icon(Icons.AutoMirrored.Filled.List, contentDescription = "Reports") }),
         AppTab("settings", "Settings", { Icon(Icons.Filled.Settings, contentDescription = "Settings") }),
     )
 
@@ -144,6 +147,32 @@ fun AppShell(
                     onCreateCase = { first, last, age, tooth, complaint, type ->
                         planningViewModel.createCase(first, last, age, tooth, complaint, type)
                     },
+                    onOpenCase = { caseLocalId ->
+                        planningViewModel.selectCase(caseLocalId)
+                        navController.navigate("case/$caseLocalId")
+                    },
+                )
+            }
+            composable(
+                route = "case/{caseId}",
+                arguments = listOf(navArgument("caseId") { type = NavType.LongType }),
+            ) { backStackEntry ->
+                val caseIdArg = backStackEntry.arguments?.getLong("caseId")
+                val caseItem = domainState.cases.firstOrNull { it.id == caseIdArg }
+                CaseFlowScreen(
+                    caseItem = caseItem,
+                    uiState = planningState,
+                    caseFlowMessage = planningViewModel.caseFlowMessage.collectAsStateWithLifecycle().value,
+                    caseFlowResult = planningViewModel.caseFlowResult.collectAsStateWithLifecycle().value,
+                    caseFlowBitmap = planningViewModel.caseFlowBitmap.collectAsStateWithLifecycle().value,
+                    onBack = { navController.navigate("dashboard") { launchSingleTop = true } },
+                    onStartAnalysis = { archUri, ianUri ->
+                        if (caseIdArg != null) {
+                            planningViewModel.selectCase(caseIdArg)
+                        }
+                        planningViewModel.startCaseFlowAnalysis(archUri, ianUri)
+                    },
+                    onDismissMessage = { planningViewModel.clearCaseFlowMessage() },
                 )
             }
             composable("upload") {
@@ -153,7 +182,7 @@ fun AppShell(
                     selectedCaseId = selectedCaseId,
                     onSelectedCaseChange = { planningViewModel.selectCase(it) },
                     onProcessRequested = { cbct, pano ->
-                        planningViewModel.uploadFilesOnly(cbct, pano)
+                        planningViewModel.uploadBoth(cbct, pano)
                     },
                 )
             }

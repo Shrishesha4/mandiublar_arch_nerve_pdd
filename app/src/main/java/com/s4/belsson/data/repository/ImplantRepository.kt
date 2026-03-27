@@ -6,6 +6,7 @@ import android.provider.OpenableColumns
 import com.s4.belsson.data.api.ImplantApiService
 import com.s4.belsson.data.model.AnalysisResponse
 import com.s4.belsson.data.model.AuthResponse
+import com.s4.belsson.data.model.CaseAnalysisResponse
 import com.s4.belsson.data.model.MeasureResponse
 import com.s4.belsson.data.model.sanitized
 import kotlinx.coroutines.Dispatchers
@@ -155,6 +156,15 @@ class ImplantRepository(private val context: Context) {
             ImplantApiService.updateCaseStatus(caseId, "Ready")
 
             emit(Result.success(Unit))
+        } catch (e: Exception) {
+            emit(Result.failure(e))
+        }
+    }.flowOn(Dispatchers.IO)
+
+    fun runCaseAnalysis(caseId: String): Flow<Result<CaseAnalysisResponse>> = flow {
+        try {
+            val response = ImplantApiService.runCaseAnalysis(caseId)
+            emit(Result.success(response))
         } catch (e: Exception) {
             emit(Result.failure(e))
         }

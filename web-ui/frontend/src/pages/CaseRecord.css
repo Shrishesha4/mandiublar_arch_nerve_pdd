@@ -1,0 +1,230 @@
+.case-record-page {
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+}
+
+.case-record-toolbar {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.case-record-back,
+.case-record-report-link,
+.case-upload-btn {
+    border: 1px solid #dbe3ef;
+    background: #ffffff;
+    color: #1f2a44;
+    border-radius: 10px;
+    padding: 0.55rem 0.9rem;
+    font-size: 0.9rem;
+    font-weight: 600;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.45rem;
+    cursor: pointer;
+}
+
+.case-record-report-link,
+.case-upload-btn {
+    background: #2563eb;
+    color: #ffffff;
+    border-color: #2563eb;
+}
+
+.case-upload-btn:disabled {
+    opacity: 0.7;
+    cursor: not-allowed;
+}
+
+.case-record-muted {
+    color: #64748b;
+    margin: 0;
+}
+
+.case-record-banner {
+    background: #e0f2fe;
+    border: 1px solid #bae6fd;
+    color: #0c4a6e;
+    border-radius: 10px;
+    padding: 0.75rem 1rem;
+}
+
+.case-steps-list {
+    display: grid;
+    gap: 0.55rem;
+}
+
+.case-step-item {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.55rem;
+    color: #64748b;
+    font-weight: 600;
+    font-size: 0.9rem;
+}
+
+.case-step-item.done {
+    color: #0f172a;
+}
+
+.case-step-dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    border: 2px solid #94a3b8;
+    background: transparent;
+}
+
+.case-step-item.done .case-step-dot {
+    border-color: #2563eb;
+    background: #2563eb;
+}
+
+.case-record-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+    gap: 1rem;
+}
+
+.case-record-card {
+    background: #ffffff;
+    border: 1px solid #e2e8f0;
+    border-radius: 14px;
+    padding: 1rem;
+}
+
+.case-record-card h3 {
+    margin: 0 0 0.75rem;
+    color: #1e293b;
+}
+
+.case-record-info-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+    gap: 0.75rem;
+}
+
+.case-record-info-grid label {
+    display: block;
+    font-size: 0.78rem;
+    color: #94a3b8;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    margin-bottom: 0.25rem;
+}
+
+.case-record-info-grid span {
+    color: #0f172a;
+    font-weight: 600;
+}
+
+.case-upload-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-end;
+    gap: 1rem;
+    padding: 0.8rem 0;
+    border-top: 1px solid #f1f5f9;
+}
+
+.case-upload-row:first-of-type {
+    border-top: 0;
+}
+
+.case-upload-label {
+    display: block;
+    margin-bottom: 0.35rem;
+    font-size: 0.85rem;
+    color: #334155;
+    font-weight: 600;
+}
+
+.case-upload-status {
+    margin-top: 0.45rem;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    font-size: 0.8rem;
+    font-weight: 600;
+}
+
+.case-upload-status.ok {
+    color: #15803d;
+}
+
+.case-upload-status.missing {
+    color: #b45309;
+}
+
+.case-files-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.6rem;
+}
+
+.case-analysis-image-wrap {
+    border: 1px solid #dbe3ef;
+    border-radius: 12px;
+    overflow: hidden;
+    background: #000;
+    margin-bottom: 0.9rem;
+}
+
+.case-analysis-image {
+    display: block;
+    width: 100%;
+    max-height: 360px;
+    object-fit: contain;
+}
+
+.case-record-note {
+    margin-top: 0.9rem;
+    background: #eff6ff;
+    border: 1px solid #bfdbfe;
+    color: #1e3a8a;
+    border-radius: 10px;
+    padding: 0.75rem 0.9rem;
+    font-size: 0.9rem;
+    font-weight: 500;
+}
+
+.case-file-item {
+    display: flex;
+    justify-content: space-between;
+    gap: 0.75rem;
+    align-items: center;
+    background: #f8fafc;
+    border-radius: 10px;
+    padding: 0.65rem 0.85rem;
+}
+
+.case-file-name {
+    color: #0f172a;
+    font-weight: 600;
+    word-break: break-all;
+}
+
+.case-file-meta {
+    color: #475569;
+    font-size: 0.82rem;
+}
+
+@media (max-width: 760px) {
+    .case-record-toolbar {
+        flex-direction: column;
+        align-items: stretch;
+        gap: 0.75rem;
+    }
+
+    .case-upload-row {
+        flex-direction: column;
+        align-items: stretch;
+    }
+
+    .case-file-item {
+        flex-direction: column;
+        align-items: flex-start;
+    }
+}
