@@ -9,11 +9,11 @@ activityCompose = "1.9.3"
 kotlin = "2.0.21"
 composeBom = "2024.12.01"
 ktor = "3.1.1"
-kotlinxSerialization = "1.8.5"
+kotlinxSerialization = "1.8.0"
 navigationCompose = "2.9.1"
 lifecycleViewmodelCompose = "2.8.7"
 room = "2.7.2"
-splashscreen = "1.1.0"
+splashscreen = "1.0.1"
 ksp = "2.0.21-1.0.28"
 
 [libraries]
@@ -54,4 +54,5 @@ android-application = { id = "com.android.application", version.ref = "agp" }
 kotlin-compose = { id = "org.jetbrains.kotlin.plugin.compose", version.ref = "kotlin" }
 kotlin-serialization = { id = "org.jetbrains.kotlin.plugin.serialization", version.ref = "kotlin" }
 ksp = { id = "com.google.devtools.ksp", version.ref = "ksp" }
+kotlin-android = { id = "org.jetbrains.kotlin.android", version.ref = "kotlin" }
 

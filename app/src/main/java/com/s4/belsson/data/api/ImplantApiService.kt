@@ -31,10 +31,14 @@ import io.ktor.client.plugins.contentnegotiation.*
 import io.ktor.client.plugins.logging.*
 import io.ktor.client.request.*
 import io.ktor.client.request.forms.*
+import io.ktor.client.statement.HttpResponse
 import io.ktor.client.statement.bodyAsText
 import io.ktor.http.*
 import io.ktor.serialization.kotlinx.json.*
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 
 /**
  * Ktor-based API service for communicating with the
@@ -43,8 +47,8 @@ import kotlinx.serialization.json.Json
 object ImplantApiService {
 
     // For emulator use "10.0.2.2"; for physical device use your machine's LAN IP
-    private const val BASE_URL = "http://10.0.2.2:8001"
-
+//    private const val BASE_URL = "http://10.0.2.2:8000"
+    private const val BASE_URL = "http://10.0.0.8:8000"
     private val json = Json {
         ignoreUnknownKeys = true
         isLenient = true
@@ -163,7 +167,7 @@ object ImplantApiService {
             setBody(AuthRequest(email = email, password = password))
         }
         if (!response.status.isSuccess()) {
-            throw Exception("Auth error: ${response.status}")
+            throw Exception(parseApiError(response, "Signup failed"))
         }
         return response.body()
     }
@@ -174,7 +178,7 @@ object ImplantApiService {
             setBody(AuthRequest(email = email, password = password))
         }
         if (!response.status.isSuccess()) {
-            throw Exception("Auth error: ${response.status}")
+            throw Exception(parseApiError(response, "Login failed"))
         }
         return response.body()
     }
@@ -185,7 +189,7 @@ object ImplantApiService {
             setBody(LoginRequest(email = email, password = password))
         }
         if (!response.status.isSuccess()) {
-            throw Exception("Auth error: ${response.status}")
+            throw Exception(parseApiError(response, "Login failed"))
         }
         return response.body()
     }
@@ -196,9 +200,26 @@ object ImplantApiService {
             setBody(request)
         }
         if (!response.status.isSuccess()) {
-            throw Exception("Register error: ${response.status}")
+            throw Exception(parseApiError(response, "Register failed"))
         }
         return response.body()
+    }
+
+    private suspend fun parseApiError(response: HttpResponse, fallback: String): String {
+        val body = runCatching { response.bodyAsText() }.getOrDefault("")
+        val detail = runCatching {
+            json.parseToJsonElement(body)
+                .jsonObject["detail"]
+                ?.jsonPrimitive
+                ?.contentOrNull
+        }.getOrNull()
+
+        val message = when {
+            !detail.isNullOrBlank() -> detail
+            body.isNotBlank() -> body.take(240)
+            else -> "${response.status}"
+        }
+        return "$fallback: $message"
     }
 
     suspend fun getUserProfile(): UserProfile {

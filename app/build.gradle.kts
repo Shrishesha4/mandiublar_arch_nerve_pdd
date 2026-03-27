@@ -3,15 +3,12 @@ plugins {
     alias(libs.plugins.kotlin.compose)
     alias(libs.plugins.kotlin.serialization)
     alias(libs.plugins.ksp)
+    alias(libs.plugins.kotlin.android)
 }
 
 android {
     namespace = "com.s4.belsson"
-    compileSdk {
-        version = release(36) {
-            minorApiLevel = 1
-        }
-    }
+    compileSdk = 36
 
     defaultConfig {
         applicationId = "com.s4.belsson"
@@ -44,6 +41,9 @@ android {
         getByName("androidTest") {
             assets.srcDir("$projectDir/schemas")
         }
+    }
+    kotlinOptions {
+        jvmTarget = "11"
     }
 }
 

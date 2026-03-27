@@ -512,7 +512,9 @@ async def signup(req: AuthRequest):
     try:
         user = auth_db.create_user(req.email, req.password)
     except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        detail = str(exc)
+        status_code = 409 if "already exists" in detail.lower() else 400
+        raise HTTPException(status_code=status_code, detail=detail) from exc
 
     token = auth_db.create_session(user_id=user["id"])
     return AuthResponse(token=token, user=AuthUser(**user))
