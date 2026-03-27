@@ -21,11 +21,12 @@ import numpy as np
 
 from fastapi import FastAPI, UploadFile, File, HTTPException, Query, Depends, status, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.routing import APIRoute
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from PIL import Image
 import pydicom
 from pydicom import config as pydicom_config
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from auth_db import AuthDatabase
 from dicom_processor import (
@@ -224,8 +225,14 @@ class CaseAnalysisResponse(BaseModel):
     id: int
     case_id: int
     created_at: str
+    workflow: str = "cbct_implant"
+    scan_region: str = "unknown"
+    ian_applicable: bool = False
+    ian_detected: bool = False
     arch_curve_data: list[list[float]]
     nerve_path_data: list[list[float]]
+    planning_overlay_data: dict = Field(default_factory=dict)
+    safe_zone_path_data: list[list[float]] = Field(default_factory=list)
     bone_width_36: str
     bone_height: str
     nerve_distance: str
@@ -1237,13 +1244,23 @@ async def run_case_analysis(case_id: str, user: dict = Depends(require_user)):
         bone_metrics = analysis_result.bone_metrics
         nerve_points = [[float(p.x), float(p.y)] for p in analysis_result.nerve_path]
         arch_points = [[float(p.x), float(p.y)] for p in analysis_result.arch_path]
+        safe_zone_points = [[float(p.x), float(p.y)] for p in analysis_result.safe_zone_path]
         nerve_distance = max(0.0, float(bone_metrics.height_mm - bone_metrics.safe_height_mm))
 
         saved = auth_db.save_case_analysis(
             case_row["id"],
             {
+            "workflow": analysis_result.workflow,
+            "scan_region": analysis_result.scan_region,
+            "ian_applicable": analysis_result.ian_applicable,
+            "ian_detected": analysis_result.ian_detected,
+            "ian_status_message": analysis_result.ian_status_message,
+            "recommendation_line": analysis_result.recommendation_line,
+            "opg_image_base64": analysis_result.opg_image_base64,
                 "arch_curve_data": arch_points,
                 "nerve_path_data": nerve_points,
+            "planning_overlay_data": analysis_result.planning_overlay.model_dump(),
+            "safe_zone_path_data": safe_zone_points,
                 "bone_width_36": f"{bone_metrics.width_mm:.1f}",
                 "bone_height": f"{bone_metrics.height_mm:.1f}",
                 "nerve_distance": f"{nerve_distance:.1f}",
@@ -1283,6 +1300,12 @@ async def get_case_analysis_result(case_id: str, user: dict = Depends(require_us
     analysis = auth_db.get_analysis_by_case(case_row["id"])
     if analysis is None:
         raise HTTPException(status_code=404, detail="Analysis not found")
+    analysis.setdefault("workflow", "cbct_implant")
+    analysis.setdefault("scan_region", "unknown")
+    analysis.setdefault("ian_applicable", False)
+    analysis.setdefault("ian_detected", False)
+    analysis.setdefault("planning_overlay_data", {})
+    analysis.setdefault("safe_zone_path_data", [])
     analysis.setdefault("opg_image_base64", None)
     analysis.setdefault("ian_status_message", None)
     analysis.setdefault("recommendation_line", None)
@@ -1332,6 +1355,47 @@ async def get_history_insight(case_id: str, user: dict = Depends(require_user)):
 @app.post("/chat", response_model=ChatResponse)
 async def chat(payload: ChatRequest, _user: dict = Depends(require_user)):
     return ChatResponse(reply=_chat_reply(payload.message))
+
+
+def add_api_prefix_aliases(app: FastAPI, prefix: str = "/api") -> None:
+    """Expose every existing route under an /api prefix for mobile and web parity."""
+
+    existing_paths = {route.path for route in app.routes}
+    for route in list(app.routes):
+        if not isinstance(route, APIRoute):
+            continue
+        if route.path.startswith(prefix):
+            continue
+
+        prefixed_path = f"{prefix}{route.path}"
+        if prefixed_path in existing_paths:
+            continue
+
+        app.add_api_route(
+            path=prefixed_path,
+            endpoint=route.endpoint,
+            methods=list(route.methods or []),
+            response_model=route.response_model,
+            status_code=route.status_code,
+            response_class=route.response_class,
+            dependencies=route.dependencies,
+            summary=route.summary,
+            description=route.description,
+            name=f"{route.name}-api" if route.name else None,
+            response_model_include=route.response_model_include,
+            response_model_exclude=route.response_model_exclude,
+            response_model_exclude_unset=route.response_model_exclude_unset,
+            response_model_exclude_defaults=route.response_model_exclude_defaults,
+            response_model_exclude_none=route.response_model_exclude_none,
+            include_in_schema=route.include_in_schema,
+            responses=route.responses,
+            tags=route.tags,
+            deprecated=route.deprecated,
+            operation_id=f"{route.operation_id}-api" if route.operation_id else None,
+        )
+
+
+add_api_prefix_aliases(app)
 
 
 # ---------- Run ----------

@@ -138,6 +138,15 @@ class AuthDatabase:
                     case_id INTEGER NOT NULL UNIQUE,
                     arch_curve_data TEXT,
                     nerve_path_data TEXT,
+                    planning_overlay_data TEXT,
+                    safe_zone_path_data TEXT,
+                    workflow TEXT,
+                    scan_region TEXT,
+                    ian_applicable INTEGER DEFAULT 0,
+                    ian_detected INTEGER DEFAULT 0,
+                    ian_status_message TEXT,
+                    recommendation_line TEXT,
+                    opg_image_base64 TEXT,
                     bone_width_36 TEXT,
                     bone_height TEXT,
                     nerve_distance TEXT,
@@ -149,6 +158,7 @@ class AuthDatabase:
                 )
                 """
             )
+            self._ensure_analysis_columns(conn)
             conn.execute(
                 """
                 CREATE TABLE IF NOT EXISTS login_history (
@@ -674,16 +684,28 @@ class AuthDatabase:
             cur = conn.execute(
                 """
                 INSERT INTO analysis_results(
-                    case_id, arch_curve_data, nerve_path_data, bone_width_36, bone_height,
+                    case_id, arch_curve_data, nerve_path_data, planning_overlay_data,
+                    safe_zone_path_data, workflow, scan_region, ian_applicable, ian_detected,
+                    ian_status_message, recommendation_line, opg_image_base64,
+                    bone_width_36, bone_height,
                     nerve_distance, safe_implant_length, clinical_report,
                     patient_explanation, created_at
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     case_pk,
                     json.dumps(analysis.get("arch_curve_data", [])),
                     json.dumps(analysis.get("nerve_path_data", [])),
+                    json.dumps(analysis.get("planning_overlay_data", {})),
+                    json.dumps(analysis.get("safe_zone_path_data", [])),
+                    str(analysis.get("workflow", "cbct_implant")),
+                    str(analysis.get("scan_region", "unknown")),
+                    1 if bool(analysis.get("ian_applicable", False)) else 0,
+                    1 if bool(analysis.get("ian_detected", False)) else 0,
+                    str(analysis.get("ian_status_message", "")),
+                    str(analysis.get("recommendation_line", "")),
+                    analysis.get("opg_image_base64"),
                     str(analysis.get("bone_width_36", "")),
                     str(analysis.get("bone_height", "")),
                     str(analysis.get("nerve_distance", "")),
@@ -706,9 +728,11 @@ class AuthDatabase:
         with self._connect() as conn:
             row = conn.execute(
                 """
-                SELECT id, case_id, arch_curve_data, nerve_path_data, bone_width_36,
-                       bone_height, nerve_distance, safe_implant_length,
-                       clinical_report, patient_explanation, created_at
+                SELECT id, case_id, arch_curve_data, nerve_path_data, planning_overlay_data,
+                       safe_zone_path_data, workflow, scan_region, ian_applicable, ian_detected,
+                      ian_status_message, recommendation_line, opg_image_base64,
+                      bone_width_36, bone_height, nerve_distance, safe_implant_length,
+                      clinical_report, patient_explanation, created_at
                 FROM analysis_results
                 WHERE case_id = ?
                 """,
@@ -721,13 +745,22 @@ class AuthDatabase:
             "case_id": int(row[1]),
             "arch_curve_data": self._json_load(row[2], default=[]),
             "nerve_path_data": self._json_load(row[3], default=[]),
-            "bone_width_36": row[4],
-            "bone_height": row[5],
-            "nerve_distance": row[6],
-            "safe_implant_length": row[7],
-            "clinical_report": row[8],
-            "patient_explanation": row[9],
-            "created_at": row[10],
+            "planning_overlay_data": self._json_load(row[4], default={}),
+            "safe_zone_path_data": self._json_load(row[5], default=[]),
+            "workflow": row[6] or "cbct_implant",
+            "scan_region": row[7] or "unknown",
+            "ian_applicable": bool(row[8]),
+            "ian_detected": bool(row[9]),
+            "ian_status_message": row[10] or "",
+            "recommendation_line": row[11] or "",
+            "opg_image_base64": row[12],
+            "bone_width_36": row[13],
+            "bone_height": row[14],
+            "nerve_distance": row[15],
+            "safe_implant_length": row[16],
+            "clinical_report": row[17],
+            "patient_explanation": row[18],
+            "created_at": row[19],
         }
 
     def list_patient_analysis_history(
@@ -872,4 +905,25 @@ class AuthDatabase:
         for col, typ in additions.items():
             if col not in existing:
                 conn.execute(f"ALTER TABLE users ADD COLUMN {col} {typ}")
+
+    @staticmethod
+    def _ensure_analysis_columns(conn: sqlite3.Connection) -> None:
+        existing = {
+            row[1]
+            for row in conn.execute("PRAGMA table_info(analysis_results)").fetchall()
+        }
+        additions = {
+            "planning_overlay_data": "TEXT",
+            "safe_zone_path_data": "TEXT",
+            "workflow": "TEXT",
+            "scan_region": "TEXT",
+            "ian_applicable": "INTEGER DEFAULT 0",
+            "ian_detected": "INTEGER DEFAULT 0",
+            "ian_status_message": "TEXT",
+            "recommendation_line": "TEXT",
+            "opg_image_base64": "TEXT",
+        }
+        for col, typ in additions.items():
+            if col not in existing:
+                conn.execute(f"ALTER TABLE analysis_results ADD COLUMN {col} {typ}")
 

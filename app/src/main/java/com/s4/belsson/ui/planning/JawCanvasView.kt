@@ -3,10 +3,14 @@ package com.s4.belsson.ui.planning
 import android.graphics.Bitmap
 import android.graphics.Matrix
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
@@ -23,6 +27,7 @@ import com.s4.belsson.data.model.OverlayLine
 import com.s4.belsson.data.model.PlanningOverlay
 import kotlin.math.atan2
 import kotlin.math.cos
+import kotlin.math.max
 import kotlin.math.sin
 import kotlin.math.sqrt
 
@@ -42,16 +47,43 @@ fun JawCanvasView(
     val displayBitmap = remember(opgBitmap) {
         opgBitmap?.copy(Bitmap.Config.ARGB_8888, false)
     }
+    var viewportScale by remember(displayBitmap) { mutableFloatStateOf(1f) }
+    var viewportOffsetX by remember(displayBitmap) { mutableFloatStateOf(0f) }
+    var viewportOffsetY by remember(displayBitmap) { mutableFloatStateOf(0f) }
 
     Canvas(
         modifier = modifier
             .fillMaxSize()
             .pointerInput(displayBitmap) {
-                detectTapGestures { offset ->
+                detectTransformGestures { _, pan, zoom, _ ->
+                    val bmp = displayBitmap ?: return@detectTransformGestures
+                    val baseScale = minOf(size.width / bmp.width, size.height / bmp.height)
+                    val nextScale = (viewportScale * zoom).coerceIn(1f, 8f)
+
+                    val scaledWidth = bmp.width * baseScale * nextScale
+                    val scaledHeight = bmp.height * baseScale * nextScale
+
+                    val maxOffsetX = max(0f, (scaledWidth - size.width) / 2f)
+                    val maxOffsetY = max(0f, (scaledHeight - size.height) / 2f)
+
+                    viewportScale = nextScale
+                    viewportOffsetX = (viewportOffsetX + pan.x).coerceIn(-maxOffsetX, maxOffsetX)
+                    viewportOffsetY = (viewportOffsetY + pan.y).coerceIn(-maxOffsetY, maxOffsetY)
+                }
+            }
+            .pointerInput(displayBitmap) {
+                detectTapGestures(
+                    onDoubleTap = {
+                        viewportScale = 1f
+                        viewportOffsetX = 0f
+                        viewportOffsetY = 0f
+                    }
+                ) { offset ->
                     val bmp = displayBitmap ?: return@detectTapGestures
-                    val scale = minOf(size.width / bmp.width, size.height / bmp.height)
-                    val left = (size.width - bmp.width * scale) / 2f
-                    val top = (size.height - bmp.height * scale) / 2f
+                    val baseScale = minOf(size.width / bmp.width, size.height / bmp.height)
+                    val scale = baseScale * viewportScale
+                    val left = (size.width - bmp.width * scale) / 2f + viewportOffsetX
+                    val top = (size.height - bmp.height * scale) / 2f + viewportOffsetY
                     val right = left + bmp.width * scale
                     val bottom = top + bmp.height * scale
                     if (offset.x !in left..right || offset.y !in top..bottom) return@detectTapGestures
@@ -73,9 +105,10 @@ fun JawCanvasView(
         if (displayBitmap != null) {
             val bmpW = displayBitmap.width.toFloat()
             val bmpH = displayBitmap.height.toFloat()
-            val scale = minOf(canvasW / bmpW, canvasH / bmpH)
-            imgLeft = (canvasW - bmpW * scale) / 2f
-            imgTop = (canvasH - bmpH * scale) / 2f
+            val baseScale = minOf(canvasW / bmpW, canvasH / bmpH)
+            val scale = baseScale * viewportScale
+            imgLeft = (canvasW - bmpW * scale) / 2f + viewportOffsetX
+            imgTop = (canvasH - bmpH * scale) / 2f + viewportOffsetY
             imgScaleX = scale
             imgScaleY = scale
 

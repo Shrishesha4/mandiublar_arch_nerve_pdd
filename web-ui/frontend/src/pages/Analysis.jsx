@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
     Brain, Ruler, ArrowsLeftRight, Warning, CheckCircle,
     FileText, Spinner
@@ -6,6 +6,7 @@ import {
 import { useSearchParams, useNavigate } from 'react-router-dom';
 import { caseService } from '../services/caseService';
 import { analysisService } from '../services/analysisService';
+import AiImageViewer from '../components/AiImageViewer';
 
 export default function Analysis() {
     const [searchParams] = useSearchParams();
@@ -16,8 +17,6 @@ export default function Analysis() {
     const [view, setView] = useState('start'); // start, loading, result
     const [caseData, setCaseData] = useState(null);
     const [analysisData, setAnalysisData] = useState(null);
-
-    const canvasRef = useRef(null);
 
     useEffect(() => {
         const loadCase = async () => {
@@ -81,62 +80,6 @@ export default function Analysis() {
             setView('result');
         } catch (e) { console.error(e); }
     };
-
-    // Canvas Drawing Effect
-    useEffect(() => {
-        if (view === 'result' && analysisData && canvasRef.current) {
-            const canvas = canvasRef.current;
-            const ctx = canvas.getContext('2d');
-            const parent = canvas.parentElement;
-
-            canvas.width = parent.clientWidth;
-            canvas.height = parent.clientHeight;
-
-            const allPoints = [];
-            if (Array.isArray(analysisData.arch_curve_data)) {
-                allPoints.push(...analysisData.arch_curve_data);
-            }
-            if (Array.isArray(analysisData.nerve_path_data)) {
-                allPoints.push(...analysisData.nerve_path_data);
-            }
-
-            let maxX = 300;
-            let maxY = 300;
-            if (allPoints.length > 0) {
-                maxX = Math.max(1, ...allPoints.map((p) => Number(p?.[0] || 0))) + 8;
-                maxY = Math.max(1, ...allPoints.map((p) => Number(p?.[1] || 0))) + 8;
-            }
-
-            const scaleX = canvas.width / maxX;
-            const scaleY = canvas.height / maxY;
-
-            // Draw Arch Form (Blue)
-            if (analysisData.arch_curve_data) {
-                ctx.beginPath();
-                ctx.strokeStyle = '#3B82F6';
-                ctx.lineWidth = 3;
-                analysisData.arch_curve_data.forEach((pt, i) => {
-                    if (i === 0) ctx.moveTo(pt[0] * scaleX, pt[1] * scaleY);
-                    else ctx.lineTo(pt[0] * scaleX, pt[1] * scaleY);
-                });
-                ctx.stroke();
-            }
-
-            // Draw Nerve (Red)
-            if (analysisData.nerve_path_data) {
-                ctx.beginPath();
-                ctx.strokeStyle = '#EF4444';
-                ctx.lineWidth = 3;
-                ctx.setLineDash([5, 5]);
-                analysisData.nerve_path_data.forEach((pt, i) => {
-                    if (i === 0) ctx.moveTo(pt[0] * scaleX, pt[1] * scaleY);
-                    else ctx.lineTo(pt[0] * scaleX, pt[1] * scaleY);
-                });
-                ctx.stroke();
-                ctx.setLineDash([]);
-            }
-        }
-    }, [view, analysisData]);
 
     return (
         <div className="analysis-page-content" style={{ display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden' }}>
@@ -205,16 +148,7 @@ export default function Analysis() {
                     <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: '2rem', height: '100%', width: '100%' }}>
                         {/* Left: Viewer */}
                         <div style={{ background: '#000', borderRadius: '12px', overflow: 'hidden', position: 'relative', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                            {analysisData.opg_image_base64 ? (
-                                <img
-                                    src={`data:image/png;base64,${analysisData.opg_image_base64}`}
-                                    alt="Processed OPG"
-                                    style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' }}
-                                />
-                            ) : (
-                                <img src="https://placehold.co/600x400/000000/ffffff?text=Processed+Scan" alt="Scan" style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' }} />
-                            )}
-                            <canvas ref={canvasRef} style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%' }} />
+                            <AiImageViewer analysisData={analysisData} />
                         </div>
 
                         {/* Right: Metrics */}
